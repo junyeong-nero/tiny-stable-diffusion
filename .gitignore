@@ -1,6 +1,9 @@
 # Claude AI configuration
 .claude/
 
+# Model checkpoints
+checkpoints/
+
 # Python-generated files
 __pycache__/
 *.py[oc]
