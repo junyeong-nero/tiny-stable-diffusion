@@ -11,7 +11,14 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.config import ModelConfig, DiffusionConfig, TrainingConfig, DataConfig, get_parser
+from src.config import (
+    ModelConfig,
+    DiffusionConfig,
+    TrainingConfig,
+    DataConfig,
+    ProjectConfig,
+    get_parser,
+)
 from src.data.dataset import EmojiDataset
 from src.models.dit import DiT
 from src.models.diffusion import Diffusion
@@ -64,6 +71,12 @@ def main() -> None:
         default=False,
         help="Use streaming mode for large datasets",
     )
+    parser.add_argument(
+        "--wandb",
+        action="store_true",
+        default=False,
+        help="Enable Weights & Biases logging",
+    )
     args = parser.parse_args()
 
     # Set random seed
@@ -86,7 +99,8 @@ def main() -> None:
     )
     data_config = DataConfig(
         source=getattr(args, "data_source", "huggingface") or "huggingface",
-        dataset_name=getattr(args, "dataset_name", "junyeong-nero/emoji-32") or "junyeong-nero/emoji-32",
+        dataset_name=getattr(args, "dataset_name", "junyeong-nero/emoji-32")
+        or "junyeong-nero/emoji-32",
         split=getattr(args, "split", "train") or "train",
         streaming=getattr(args, "streaming", False) or False,
     )
@@ -147,6 +161,44 @@ def main() -> None:
     # Print model info
     model_info = model.get_model_size_info()
     print(f"Model parameters: {model_info['num_parameters']:,}")
+
+    # Initialize wandb
+    project_config = ProjectConfig(
+        name=getattr(args, "name", None) or "pixmoji-diffusion",
+        experiment_name=getattr(args, "name", None) or f"dit-{model_config.model_size}",
+        seed=args.seed or 42,
+        use_wandb=getattr(args, "wandb", False) or False,
+    )
+
+    wandb_run = None
+    if project_config.use_wandb:
+        try:
+            import wandb
+
+            wandb.login()
+            wandb_run = wandb.init(
+                project=project_config.name,
+                name=project_config.experiment_name,
+                config={
+                    "model_size": model_config.model_size,
+                    "patch_size": model_config.patch_size,
+                    "image_size": model_config.image_size,
+                    "epochs": training_config.epochs,
+                    "batch_size": training_config.batch_size,
+                    "learning_rate": training_config.learning_rate,
+                    "num_timesteps": diffusion_config.num_timesteps,
+                    "beta_schedule": diffusion_config.beta_schedule,
+                    "guidance_scale": diffusion_config.guidance_scale,
+                    "cfg_probability": diffusion_config.cfg_probability,
+                    "dataset": data_config.dataset_name,
+                    "seed": project_config.seed,
+                },
+            )
+            print(f"Initialized W&B: {wandb.run.url}")
+        except ImportError:
+            print("wandb not installed. Install with: pip install wandb")
+        except Exception as e:
+            print(f"Failed to initialize wandb: {e}")
 
     # Initialize diffusion
     diffusion = Diffusion(
@@ -221,35 +273,65 @@ def main() -> None:
         avg_loss = epoch_loss / len(dataloader)
         print(f"Epoch {epoch + 1}: Avg Loss = {avg_loss:.4f}")
 
+        # Log to wandb
+        if wandb_run is not None:
+            import wandb
+
+            wandb.log(
+                {
+                    "train_loss": avg_loss,
+                    "learning_rate": scheduler.get_last_lr()[0],
+                    "epoch": epoch + 1,
+                }
+            )
+
         # Save checkpoint
         if (epoch + 1) % training_config.checkpoint_interval == 0:
             checkpoint_path = output_dir / f"checkpoint_epoch_{epoch + 1}.pt"
-            torch.save({
-                "epoch": epoch + 1,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict(),
-                "loss": avg_loss,
-                "model_config": {
-                    "model_size": model_config.model_size,
-                    "patch_size": model_config.patch_size,
-                    "image_size": model_config.image_size,
+            torch.save(
+                {
+                    "epoch": epoch + 1,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "scheduler_state_dict": scheduler.state_dict(),
+                    "loss": avg_loss,
+                    "model_config": {
+                        "model_size": model_config.model_size,
+                        "patch_size": model_config.patch_size,
+                        "image_size": model_config.image_size,
+                    },
                 },
-            }, checkpoint_path)
+                checkpoint_path,
+            )
             print(f"Saved checkpoint: {checkpoint_path}")
 
     # Save final model
     final_path = output_dir / "model_final.pt"
-    torch.save({
-        "epoch": training_config.epochs,
-        "model_state_dict": model.state_dict(),
-        "model_config": {
-            "model_size": model_config.model_size,
-            "patch_size": model_config.patch_size,
-            "image_size": model_config.image_size,
+    torch.save(
+        {
+            "epoch": training_config.epochs,
+            "model_state_dict": model.state_dict(),
+            "model_config": {
+                "model_size": model_config.model_size,
+                "patch_size": model_config.patch_size,
+                "image_size": model_config.image_size,
+            },
         },
-    }, final_path)
+        final_path,
+    )
     print(f"Saved final model: {final_path}")
+
+    # Finish wandb
+    if wandb_run is not None:
+        import wandb
+
+        # Log final model as artifact
+        artifact = wandb.Artifact("pixmoji-model", type="model")
+        artifact.add_file(str(final_path))
+        wandb.log_artifact(artifact)
+
+        wandb.finish()
+        print("W&B run finished")
 
 
 if __name__ == "__main__":

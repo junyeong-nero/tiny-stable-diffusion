@@ -1,8 +1,12 @@
 # Claude AI configuration
 .claude/
+.ruff_cache/
+wandb/
+# Claude AI configuration
+
 
 # Model checkpoints
-checkpoints/
+ checkpoints/
 
 # Python-generated files
 __pycache__/

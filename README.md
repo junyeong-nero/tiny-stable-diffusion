@@ -159,18 +159,25 @@ Train your own model from scratch:
 ```bash
 uv run python src/training/train.py \
     --epochs 100 \
-    --batch_size 64 \
-    --learning_rate 1e-4 \
-    --model_size S
+    --batch-size 64 \
+    --learning-rate 1e-4 \
+    --model-size S
+```
+
+Or using the convenience script:
+
+```bash
+./scripts/train.sh --epochs 100 --batch-size 64 --model-size S
 ```
 
 **Training Arguments**:
 - `--epochs`: Number of training epochs (default: 100)
-- `--batch_size`: Batch size (default: 64)
-- `--learning_rate`: Learning rate (default: 1e-4)
-- `--model_size`: DiT model size: S, B, L (default: S)
-- `--dataset_name`: Hugging Face dataset name (default: junyeong-nero/emoji-32)
-- `--output_dir`: Checkpoint output directory (default: checkpoints)
+- `--batch-size`: Batch size (default: 64)
+- `--learning-rate`: Learning rate (default: 1e-4)
+- `--model-size`: DiT model size: S, B, L (default: S)
+- `--dataset-name`: Hugging Face dataset name (default: junyeong-nero/emoji-32)
+- `--output-dir`: Checkpoint output directory (default: checkpoints)
+- `--wandb`: Enable Weights & Biases logging
 
 ### 4. Inference (Generation)
 
@@ -179,17 +186,17 @@ Generate emojis using a trained model:
 ```bash
 uv run python src/inference/generate.py \
     --prompt "a cute robot" \
-    --n_samples 4 \
+    --num-samples 4 \
     --checkpoint checkpoints/model_final.pt \
-    --guidance_scale 7.5 \
+    --guidance-scale 7.5 \
     --steps 50
 ```
 
 **Generation Arguments**:
 - `--prompt`: Text description of the image (English recommended)
-- `--n_samples`: Number of images to generate (default: 4)
+- `--num-samples`: Number of images to generate (default: 4)
 - `--checkpoint`: Path to model checkpoint
-- `--guidance_scale`: CFG scale (default: 7.5)
+- `--guidance-scale`: CFG scale (default: 7.5)
 - `--steps`: Sampling steps, DDIM (default: 50), DDPM (default: 1000)
 - `--ddim`: Use DDIM sampling (default: True)
 - `--seed`: Random seed for reproducibility (default: 42)
