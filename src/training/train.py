@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
+import math
 import random
 from pathlib import Path
 
@@ -12,16 +12,16 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.config import (
-    ModelConfig,
-    DiffusionConfig,
-    TrainingConfig,
     DataConfig,
+    DiffusionConfig,
+    ModelConfig,
     ProjectConfig,
+    TrainingConfig,
     get_parser,
 )
 from src.data.dataset import EmojiDataset
-from src.models.dit import DiT
 from src.models.diffusion import Diffusion
+from src.models.dit import DiT
 from src.text_encoder.clip_encoder import CLIPTextEncoder
 
 
@@ -115,16 +115,14 @@ def main() -> None:
         dataset = EmojiDataset(
             dataset_name=data_config.dataset_name,
             split=data_config.split,
-            image_size=data_config.image_size,
             streaming=data_config.streaming,
         )
     else:
-        print(f"Loading local dataset from: data/")
+        print("Loading local dataset from: data/")
         from src.data.dataset import LocalEmojiDataset
 
         dataset = LocalEmojiDataset(
             data_dir="data",
-            image_size=data_config.image_size,
         )
 
     print(f"Dataset size: {len(dataset)}")
@@ -217,11 +215,25 @@ def main() -> None:
         weight_decay=training_config.weight_decay,
     )
 
-    # Learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    # Learning rate scheduler with warmup
+    # Using linear warmup followed by cosine annealing (DiT paper approach)
+    num_steps_per_epoch = len(dataloader)
+    total_steps = training_config.epochs * num_steps_per_epoch
+    warmup_steps = training_config.warmup_steps
+
+    def lr_lambda(step: int) -> float:
+        """Learning rate schedule: warmup + cosine decay."""
+        if step < warmup_steps:
+            # Linear warmup
+            return float(step) / float(max(1, warmup_steps))
+        else:
+            # Cosine decay
+            progress = float(step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer,
-        T_max=training_config.epochs * len(dataloader),
-        eta_min=training_config.min_lr,
+        lr_lambda=lr_lambda,
     )
 
     # Training loop
@@ -243,7 +255,7 @@ def main() -> None:
             with torch.no_grad():
                 text_embeds = clip_encoder.encode(captions)
 
-            # Sample random timesteps
+            # Sample random timesteps for noise prediction
             timesteps = torch.randint(
                 0,
                 diffusion.num_timesteps,

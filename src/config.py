@@ -109,12 +109,12 @@ class TrainingConfig:
     batch_size: int = 64
     # Number of training epochs
     epochs: int = 100
-    # Learning rate
-    learning_rate: float = 1e-4
+    # Learning rate (increased from 1e-4 for better convergence)
+    learning_rate: float = 5e-4
     # Minimum learning rate for cosine scheduler
     min_lr: float = 1e-6
-    # Warmup steps
-    warmup_steps: int = 500
+    # Warmup steps (increased for stable training)
+    warmup_steps: int = 1000
     # Optimizer betas (AdamW)
     betas: tuple = (0.9, 0.999)
     # Optimizer epsilon
@@ -243,9 +243,7 @@ class ProjectConfig:
 
 def get_parser() -> argparse.ArgumentParser:
     """Create argument parser for command-line interface."""
-    parser = argparse.ArgumentParser(
-        description="PixMoji-Diffusion: Text-to-Pixel Art Generator"
-    )
+    parser = argparse.ArgumentParser(description="PixMoji-Diffusion: Text-to-Pixel Art Generator")
 
     # Project arguments
     parser.add_argument(
@@ -400,7 +398,8 @@ def get_config(args: argparse.Namespace | None = None) -> dict:
         )
         data_config = DataConfig(
             source=getattr(args, "data_source", "huggingface") or "huggingface",
-            dataset_name=getattr(args, "dataset_name", "junyeong-nero/emoji-32") or "junyeong-nero/emoji-32",
+            dataset_name=getattr(args, "dataset_name", "junyeong-nero/emoji-32")
+            or "junyeong-nero/emoji-32",
             split=getattr(args, "split", "train") or "train",
             streaming=getattr(args, "streaming", False) or False,
         )

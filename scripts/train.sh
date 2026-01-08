@@ -14,9 +14,9 @@ echo "========================================"
 
 # Default values
 EPOCHS=100
-BATCH_SIZE=64
-LEARNING_RATE=1e-4
-MODEL_SIZE="S"
+BATCH_SIZE=8
+LEARNING_RATE=3e-4
+MODEL_SIZE="B"
 DATASET_NAME="junyeong-nero/emoji-32"
 OUTPUT_DIR="checkpoints"
 DEVICE="auto"
@@ -72,8 +72,8 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --epochs N           Number of training epochs (default: 100)"
-            echo "  --batch-size N       Batch size (default: 64)"
-            echo "  --learning-rate LR   Learning rate (default: 1e-4)"
+            echo "  --batch-size N       Batch size (default: 16)"
+            echo "  --learning-rate LR   Learning rate (default: 3e-4)"
             echo "  --model-size S|B|L   DiT model size (default: S)"
             echo "  --dataset-name NAME  Hugging Face dataset name"
             echo "  --output-dir DIR     Checkpoint output directory"

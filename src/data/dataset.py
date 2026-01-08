@@ -66,17 +66,17 @@ class EmojiDataset(Dataset):
                 self.size = len(self.dataset_split)
 
         except ImportError:
-            raise ImportError(
-                "datasets library not found. Install with: pip install datasets"
-            )
+            raise ImportError("datasets library not found. Install with: pip install datasets")
         except Exception as e:
             raise RuntimeError(f"Failed to load dataset: {e}")
 
         if transform is None:
-            self.transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-            ])
+            self.transform = transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+                ]
+            )
         else:
             self.transform = transform
 
@@ -126,6 +126,8 @@ class EmojiDataset(Dataset):
             result = []
             for sample in samples:
                 image = sample[self.image_field]
+                if image is None:
+                    continue
                 if not isinstance(image, Image.Image):
                     image = Image.fromarray(image)
                 if image.mode == "RGBA":
@@ -136,10 +138,12 @@ class EmojiDataset(Dataset):
                     image = image.convert("RGB")
                 if self.transform:
                     image = self.transform(image)
-                result.append({
-                    "image": image,
-                    "caption": sample.get(self.caption_field, ""),
-                })
+                result.append(
+                    {
+                        "image": image,
+                        "caption": sample.get(self.caption_field, ""),
+                    }
+                )
             return result
 
     def __repr__(self) -> str:
@@ -169,10 +173,12 @@ class LocalEmojiDataset(Dataset):
         self.image_paths = sorted(self.image_paths)
 
         if transform is None:
-            self.transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-            ])
+            self.transform = transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+                ]
+            )
         else:
             self.transform = transform
 
@@ -197,6 +203,7 @@ class LocalEmojiDataset(Dataset):
     def _extract_caption(self, filename: str) -> str:
         name = Path(filename).stem
         import re
+
         if re.match(r"^[0-9a-fA-F]+$", name):
             return name
         parts = name.split("_")
@@ -206,11 +213,7 @@ class LocalEmojiDataset(Dataset):
         return caption.lower()
 
     def __repr__(self) -> str:
-        return (
-            f"LocalEmojiDataset("
-            f"data_dir={self.data_dir}, "
-            f"num_samples={len(self)})"
-        )
+        return f"LocalEmojiDataset(data_dir={self.data_dir}, num_samples={len(self)})"
 
 
 def get_dataset(
@@ -247,4 +250,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
