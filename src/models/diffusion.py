@@ -43,9 +43,7 @@ class Diffusion:
         elif beta_schedule == "linear":
             betas = torch.linspace(beta_start, beta_end, num_timesteps)
         elif beta_schedule == "quadratic":
-            betas = torch.linspace(
-                beta_start**0.5, beta_end**0.5, num_timesteps
-            ) ** 2
+            betas = torch.linspace(beta_start**0.5, beta_end**0.5, num_timesteps) ** 2
         else:
             raise ValueError(f"Unknown beta schedule: {beta_schedule}")
 
@@ -54,19 +52,13 @@ class Diffusion:
         # Precompute diffusion parameters
         alphas = 1.0 - betas
         self.alphas_cumprod = torch.cumprod(alphas, dim=0)
-        self.alphas_cumprod_prev = torch.cat(
-            [torch.tensor([1.0]), self.alphas_cumprod[:-1]]
-        )
+        self.alphas_cumprod_prev = torch.cat([torch.tensor([1.0]), self.alphas_cumprod[:-1]])
 
         # For DDIM sampling
         self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
-        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(
-            1.0 - self.alphas_cumprod
-        )
+        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
         self.sqrt_recip_alphas_cumprod = torch.sqrt(1.0 / self.alphas_cumprod)
-        self.sqrt_recip_alphas_cumprod_minus_1 = torch.sqrt(
-            1.0 / self.alphas_cumprod - 1
-        )
+        self.sqrt_recip_alphas_cumprod_minus_1 = torch.sqrt(1.0 / self.alphas_cumprod - 1)
 
         # Posterior mean and variance for DDPM
         self.posterior_mean_coef1 = (
@@ -90,9 +82,7 @@ class Diffusion:
         """
         steps = self.num_timesteps + 1
         x = torch.linspace(0, self.num_timesteps, steps)
-        alphas_cumprod = torch.cos(
-            ((x / self.num_timesteps) + s) / (1 + s) * math.pi * 0.5
-        ) ** 2
+        alphas_cumprod = torch.cos(((x / self.num_timesteps) + s) / (1 + s) * math.pi * 0.5) ** 2
         alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
         betas = 1.0 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
         betas = torch.clip(betas, 0.0, 0.999)
@@ -117,16 +107,12 @@ class Diffusion:
         if noise is None:
             noise = torch.randn_like(x_0)
 
-        sqrt_alphas_cumprod_t = self._extract(
-            self.sqrt_alphas_cumprod, timesteps, x_0.shape
-        )
+        sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, timesteps, x_0.shape)
         sqrt_one_minus_alphas_cumprod_t = self._extract(
             self.sqrt_one_minus_alphas_cumprod, timesteps, x_0.shape
         )
 
-        return (
-            sqrt_alphas_cumprod_t * x_0 + sqrt_one_minus_alphas_cumprod_t * noise
-        )
+        return sqrt_alphas_cumprod_t * x_0 + sqrt_one_minus_alphas_cumprod_t * noise
 
     def p_sample(
         self,
@@ -179,8 +165,10 @@ class Diffusion:
         if timesteps.dim() == 0:
             timesteps = timesteps.unsqueeze(0)
 
-        noise = torch.randn_like(x_t) * nonzero_mask * self._extract(
-            posterior_std, timesteps, x_t.shape
+        noise = (
+            torch.randn_like(x_t)
+            * nonzero_mask
+            * self._extract(posterior_std, timesteps, x_t.shape)
         )
 
         return posterior_mean + noise
@@ -233,14 +221,15 @@ class Diffusion:
         # Predict x_0
         pred_x_0 = (
             self._extract(self.sqrt_recip_alphas_cumprod, timesteps, x_t.shape) * x_t
-            - self._extract(self.sqrt_recip_alphas_cumprod_minus_1, timesteps, x_t.shape) * predicted_noise
+            - self._extract(self.sqrt_recip_alphas_cumprod_minus_1, timesteps, x_t.shape)
+            * predicted_noise
         )
         pred_x_0 = torch.clamp(pred_x_0, -1.0, 1.0)
 
         # Direction pointing to x_t
-        dir_xt = torch.sqrt(1.0 - alpha_t_1 - eta * (1.0 - alpha_t) / (1.0 - alpha_t) * (1 - alpha_t_1 / alpha_t)) * (
-            torch.sqrt(alpha_t_1 / alpha_t) * x_t - pred_x_0
-        )
+        dir_xt = torch.sqrt(
+            1.0 - alpha_t_1 - eta * (1.0 - alpha_t) / (1.0 - alpha_t) * (1 - alpha_t_1 / alpha_t)
+        ) * (torch.sqrt(alpha_t_1 / alpha_t) * x_t - pred_x_0)
 
         # Add noise for stochasticity
         noise = torch.randn_like(x_t)
@@ -307,13 +296,9 @@ class Diffusion:
             t_batch = torch.full((B,), t, device=device, dtype=torch.long)
 
             if use_ddim:
-                x_t = self.ddim_sample(
-                    model, x_t, t_batch, text_embeds, eta=eta, use_cfg=use_cfg
-                )
+                x_t = self.ddim_sample(model, x_t, t_batch, text_embeds, eta=eta, use_cfg=use_cfg)
             else:
-                x_t = self.p_sample(
-                    model, x_t, t_batch, text_embeds, use_cfg=use_cfg
-                )
+                x_t = self.p_sample(model, x_t, t_batch, text_embeds, use_cfg=use_cfg)
 
         # Normalize to [0, 1]
         x_t = (x_t + 1.0) / 2.0
@@ -337,6 +322,8 @@ class Diffusion:
         Returns:
             Extracted values with correct shape for broadcasting
         """
+        # Move tensor a to the same device as t
+        a = a.to(device=t.device)
         B = t.shape[0]
         out = a.gather(dim=0, index=t)
         return out.reshape(B, *([1] * (len(x_shape) - 1)))
@@ -377,7 +364,6 @@ class Diffusion:
 
 
 import tqdm  # noqa: E402
-
 
 if __name__ == "__main__":
     # Quick test
