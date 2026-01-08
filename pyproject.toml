@@ -1,0 +1,91 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pixmoji-diffusion"
+version = "0.1.0"
+description = "Text-to-Pixel Art Generator using Diffusion Transformer (DiT) with CLIP conditioning"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Your Name", email = "your.email@example.com" }
+]
+keywords = [
+    "diffusion",
+    "transformer",
+    "pixel-art",
+    "emoji",
+    "text-to-image",
+    "generative-ai",
+    "machine-learning",
+    "deep-learning",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Graphics",
+]
+
+dependencies = [
+    "torch>=2.0.0",
+    "transformers>=4.30.0",
+    "pillow>=10.0.0",
+    "numpy>=1.24.0",
+    "tqdm>=4.65.0",
+    "matplotlib>=3.7.0",
+    "datasets>=4.4.2",
+    "torchvision>=0.24.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+    "pre-commit>=3.4.0",
+]
+
+[project.scripts]
+pixmoji-train = "src.training.train:main"
+pixmoji-generate = "src.inference.generate:main"
+
+[project.urls]
+Homepage = "https://github.com/your-username/pixmoji-diffusion"
+Repository = "https://github.com/your-username/pixmoji-diffusion"
+Issues = "https://github.com/your-username/pixmoji-diffusion/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "W"]
+ignore = ["E501"]  # Line too long
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "ruff>=0.14.10",
+]

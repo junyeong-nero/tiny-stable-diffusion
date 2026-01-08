@@ -1,0 +1,1 @@
+"""Text encoding utilities (CLIP)."""
