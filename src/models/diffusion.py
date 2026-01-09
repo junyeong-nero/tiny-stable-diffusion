@@ -302,7 +302,7 @@ class Diffusion:
             timesteps = torch.arange(self.num_timesteps - 1, -1, -1)
 
         # Sampling loop
-        for i, t in enumerate(tqdm.tqdm(tqdm.reversed(timesteps), desc="Sampling")):
+        for i, t in enumerate(tqdm.tqdm(reversed(timesteps), desc="Sampling")):
             t_batch = torch.full((B,), t, device=device, dtype=torch.long)
 
             if use_ddim:
