@@ -180,6 +180,35 @@ uv run main.py --finetune \
 | `--learning-rate` | Learning rate | config default |
 | `--dataset` | Dataset path or name | config default |
 | `--checkpoint` | Pretrained checkpoint path (finetune only) | config default |
+| `--wandb` | Enable wandb logging | disabled |
+| `--wandb-project` | Wandb project name | text-to-emoji |
+| `--wandb-run-name` | Wandb run name | auto-generated |
+
+### Weights & Biases Logging
+
+Enable experiment tracking with [Weights & Biases](https://wandb.ai):
+
+```bash
+# Basic usage
+uv run main.py --pretrain --wandb
+
+# With custom project and run name
+uv run main.py --pretrain --wandb --wandb-project my-project --wandb-run-name exp-1
+
+# Fine-tuning with wandb
+uv run main.py --finetune --checkpoint checkpoints/pretrain.pt --wandb
+```
+
+**Logged Metrics:**
+
+| Metric | Description | Frequency |
+| :--- | :--- | :--- |
+| `train/loss` | Training loss | Every step |
+| `train/learning_rate` | Current learning rate | Every step |
+| `train/global_step` | Global step counter | Every step |
+| `epoch/avg_loss` | Average epoch loss | Every epoch |
+| `epoch/epoch` | Current epoch | Every epoch |
+| `epoch/cfg_probability` | CFG dropout probability | Every epoch |
 
 ### Generating Images
 

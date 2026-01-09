@@ -26,6 +26,13 @@ from PIL import Image
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+try:
+    import wandb
+
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
 from src.config import DataConfig, DiffusionConfig, ModelConfig, TrainingConfig
 from src.data.dataset import CIFAR100Dataset, EmojiDataset
 from src.models.diffusion import Diffusion
@@ -44,8 +51,8 @@ TRAINING_STAGE: str = "pretrain"  # Change to "finetune" for Stage 2
 # Pretraining Settings (Stage 1)
 PRETRAIN_CONFIG: dict[str, Any] = {
     "data_source": "cifar100",
-    "epochs": 2,  # Quick test run
-    "batch_size": 32,  # Smaller batch for MPS
+    "epochs": 200,  # Quick test run
+    "batch_size": 128,  # Smaller batch for MPS
     "learning_rate": 1e-4,
     "image_size": 32,
     "initial_cfg_prob": 0.0,
@@ -78,7 +85,7 @@ COMMON_CONFIG: dict[str, Any] = {
     "use_ema": True,
     "ema_decay": 0.9999,
     "mixed_precision": False,
-    "device": "auto",
+    "device": "cuda",  # Force CUDA for training
     "seed": 42,
     "validation_prompts": ["rocket", "cat", "robot", "star", "heart"],
     "validation_interval": 5,
@@ -145,7 +152,9 @@ def train_one_epoch(
     device: torch.device,
     use_amp: bool = False,
     scaler: torch.cuda.amp.GradScaler | None = None,
-) -> float:
+    use_wandb: bool = False,
+    global_step: int = 0,
+) -> tuple[float, int]:
     """Train for one epoch."""
     model.train()
     epoch_loss = 0.0
@@ -172,14 +181,18 @@ def train_one_epoch(
 
         if use_amp and device.type == "cuda":
             with torch.cuda.amp.autocast():
-                loss = diffusion.training_loss(model, images, timesteps, text_embeds, text_mask)
+                loss = diffusion.training_loss(
+                    model, images, timesteps, text_embeds, text_mask
+                )
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
         else:
-            loss = diffusion.training_loss(model, images, timesteps, text_embeds, text_mask)
+            loss = diffusion.training_loss(
+                model, images, timesteps, text_embeds, text_mask
+            )
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -189,10 +202,24 @@ def train_one_epoch(
         if ema is not None:
             ema.update()
 
-        epoch_loss += loss.item()
-        progress_bar.set_postfix({"loss": loss.item()})
+        loss_value = loss.item()
+        epoch_loss += loss_value
+        progress_bar.set_postfix({"loss": loss_value})
 
-    return epoch_loss / len(dataloader)
+        # Log step metrics to wandb
+        if use_wandb:
+            wandb.log(
+                {
+                    "train/loss": loss_value,
+                    "train/learning_rate": scheduler.get_last_lr()[0],
+                    "train/global_step": global_step,
+                },
+                step=global_step,
+            )
+
+        global_step += 1
+
+    return epoch_loss / len(dataloader), global_step
 
 
 @torch.no_grad()
@@ -255,7 +282,7 @@ def save_checkpoint(
     print(f"✓ Saved checkpoint: {path}")
 
 
-def train(config: dict[str, Any]) -> None:
+def train(config: dict[str, Any], use_wandb: bool = False) -> None:
     """Main training function."""
     if TRAINING_STAGE == "pretrain":
         print("=" * 60)
@@ -270,6 +297,19 @@ def train(config: dict[str, Any]) -> None:
     for key, value in config.items():
         print(f"  {key}: {value}")
     print()
+
+    # Initialize wandb if enabled
+    if use_wandb:
+        if not WANDB_AVAILABLE:
+            print("Warning: wandb not installed. Disabling wandb logging.")
+            use_wandb = False
+        else:
+            wandb.init(
+                project=config.get("wandb_project", "text-to-emoji"),
+                name=config.get("wandb_run_name", None),
+                config=config,
+            )
+            print("Wandb logging enabled")
 
     set_seed(config["seed"])
     device = get_device(config["device"])
@@ -350,7 +390,9 @@ def train(config: dict[str, Any]) -> None:
         if step < warmup_steps:
             return float(step) / float(max(1, warmup_steps))
         else:
-            progress = float(step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            progress = float(step - warmup_steps) / float(
+                max(1, total_steps - warmup_steps)
+            )
             return 0.5 * (1.0 + math.cos(math.pi * progress))
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
@@ -369,6 +411,7 @@ def train(config: dict[str, Any]) -> None:
 
     print(f"\nStarting training for {config['epochs']} epochs...")
     best_loss = float("inf")
+    global_step = 0
 
     for epoch in range(config["epochs"]):
         if cfg_warmup > 0 and epoch < cfg_warmup:
@@ -380,7 +423,7 @@ def train(config: dict[str, Any]) -> None:
         elif cfg_warmup > 0:
             diffusion.cfg_probability = final_cfg
 
-        avg_loss = train_one_epoch(
+        avg_loss, global_step = train_one_epoch(
             model=model,
             diffusion=diffusion,
             dataloader=dataloader,
@@ -391,9 +434,22 @@ def train(config: dict[str, Any]) -> None:
             device=device,
             use_amp=use_amp,
             scaler=scaler,
+            use_wandb=use_wandb,
+            global_step=global_step,
         )
 
         print(f"Epoch {epoch + 1}/{config['epochs']}: Avg Loss = {avg_loss:.4f}")
+
+        # Log epoch-level metrics to wandb
+        if use_wandb:
+            wandb.log(
+                {
+                    "epoch/avg_loss": avg_loss,
+                    "epoch/epoch": epoch + 1,
+                    "epoch/cfg_probability": diffusion.cfg_probability,
+                },
+                step=global_step,
+            )
 
         checkpoint_path = config["checkpoint_path"]
         if avg_loss < best_loss:
@@ -425,7 +481,14 @@ def train(config: dict[str, Any]) -> None:
             for i, prompt in enumerate(config["validation_prompts"]):
                 img = samples[i]
                 img = (img + 1) / 2
-                img = img.permute(1, 2, 0).mul(255).clamp(0, 255).to(torch.uint8).cpu().numpy()
+                img = (
+                    img.permute(1, 2, 0)
+                    .mul(255)
+                    .clamp(0, 255)
+                    .to(torch.uint8)
+                    .cpu()
+                    .numpy()
+                )
                 img = Image.fromarray(img)
                 safe_prompt = prompt.replace(" ", "_")[:20]
                 img.save(sample_dir / f"{i:02d}_{safe_prompt}.png")
@@ -437,6 +500,10 @@ def train(config: dict[str, Any]) -> None:
     print(f"Best loss: {best_loss:.4f}")
     print(f"Checkpoint: {config['checkpoint_path']}")
     print("=" * 60)
+
+    # Finish wandb run
+    if use_wandb:
+        wandb.finish()
 
 
 # =============================================================================
@@ -535,7 +602,14 @@ def generate(
 
         for j, img in enumerate(images):
             img = (img + 1) / 2  # Denormalize
-            img = img.permute(1, 2, 0).mul(255).clamp(0, 255).to(torch.uint8).cpu().numpy()
+            img = (
+                img.permute(1, 2, 0)
+                .mul(255)
+                .clamp(0, 255)
+                .to(torch.uint8)
+                .cpu()
+                .numpy()
+            )
             pil_img = Image.fromarray(img)
             all_images.append(pil_img)
 
@@ -615,7 +689,14 @@ def demo() -> None:
 
             img = images[0]
             img = (img + 1) / 2
-            img = img.permute(1, 2, 0).mul(255).clamp(0, 255).to(torch.uint8).cpu().numpy()
+            img = (
+                img.permute(1, 2, 0)
+                .mul(255)
+                .clamp(0, 255)
+                .to(torch.uint8)
+                .cpu()
+                .numpy()
+            )
             pil_img = Image.fromarray(img)
 
             # Save and display
@@ -735,6 +816,23 @@ def main() -> None:
         default=None,
         help="Random seed for reproducibility",
     )
+    parser.add_argument(
+        "--wandb",
+        action="store_true",
+        help="Enable wandb logging",
+    )
+    parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default="text-to-emoji",
+        help="Wandb project name",
+    )
+    parser.add_argument(
+        "--wandb-run-name",
+        type=str,
+        default=None,
+        help="Wandb run name",
+    )
 
     args = parser.parse_args()
 
@@ -758,7 +856,10 @@ def main() -> None:
             config["learning_rate"] = args.learning_rate
         if args.checkpoint is not None:
             config["checkpoint_path"] = args.checkpoint
-        train(config)
+        # Wandb settings
+        config["wandb_project"] = args.wandb_project
+        config["wandb_run_name"] = args.wandb_run_name
+        train(config, use_wandb=args.wandb)
 
     elif args.finetune:
         config = {**COMMON_CONFIG, **FINETUNE_CONFIG}
@@ -780,7 +881,10 @@ def main() -> None:
             config["batch_size"] = args.batch_size
         if args.learning_rate is not None:
             config["learning_rate"] = args.learning_rate
-        train(config)
+        # Wandb settings
+        config["wandb_project"] = args.wandb_project
+        config["wandb_run_name"] = args.wandb_run_name
+        train(config, use_wandb=args.wandb)
 
     elif args.train:
         # Select config based on TRAINING_STAGE constant
@@ -788,7 +892,10 @@ def main() -> None:
             config = {**COMMON_CONFIG, **PRETRAIN_CONFIG}
         else:
             config = {**COMMON_CONFIG, **FINETUNE_CONFIG}
-        train(config)
+        # Wandb settings
+        config["wandb_project"] = args.wandb_project
+        config["wandb_run_name"] = args.wandb_run_name
+        train(config, use_wandb=args.wandb)
 
     elif args.generate:
         if args.prompt is None:
