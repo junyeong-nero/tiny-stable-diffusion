@@ -67,13 +67,31 @@ Uses OpenAI's **CLIP** Text Encoder in frozen mode:
 
 ### 3. Model Configurations
 
-| Model | Layers | Hidden Size | Heads | DiT Params | MMDiT Params |
-|-------|--------|-------------|-------|------------|--------------|
-| DiT-S | 12 | 384 | 6 | ~30M | ~87M |
-| DiT-B | 12 | 768 | 12 | ~130M | ~300M |
-| DiT-L | 24 | 1024 | 16 | ~300M | ~675M |
+#### DiT Models (Standard)
 
-Default: **DiT-S** (~30M parameters for DiT, ~87M for MMDiT) for efficient training and inference.
+| Model | Layers | Hidden Size | Heads | Parameters |
+|-------|--------|-------------|-------|------------|
+| DiT-S | 12 | 384 | 6 | ~30M |
+| DiT-B | 12 | 768 | 12 | ~130M |
+| DiT-L | 24 | 1024 | 16 | ~300M |
+| DiT-XL | 28 | 1152 | 16 | ~675M |
+
+#### MMDiT Models (Stable Diffusion 3)
+
+| Model | Layers | Hidden Size | Heads | Parameters |
+|-------|--------|-------------|-------|------------|
+| MMDiT-S | 12 | 384 | 6 | ~87M |
+| MMDiT-B | 12 | 768 | 12 | ~300M |
+| MMDiT-L | 24 | 1024 | 16 | ~675M |
+| MMDiT-XL | 28 | 1152 | 16 | ~1.6B |
+
+**Default**: **DiT-S** (~30M parameters for DiT, ~87M for MMDiT) for efficient training and inference.
+
+Configure model size in `config.yaml`:
+```yaml
+model_type: mmdit  # or "dit"
+model_size: S      # Options: S, B, L, XL
+```
 
 ### 4. MMDiT-Specific Features
 
@@ -313,17 +331,25 @@ text-to-emoji/
 ├── src/
 │   ├── config.py          # Configuration classes
 │   ├── data/
-│   │   └── dataset.py     # Dataset loaders (emoji, CIFAR-100)
+│   │   ├── dataset.py     # Dataset loaders (emoji, CIFAR-100)
+│   │   └── loader.py      # Data loading utilities
 │   ├── models/
-│   │   ├── dit.py         # DiT model implementation
-│   │   └── diffusion.py   # Diffusion process
+│   │   ├── diffusion.py   # Diffusion process
+│   │   ├── factory.py     # Model factory (DiT/MMDiT)
+│   │   ├── vanilla_dit.py # Standard DiT implementation
+│   │   └── mmdit.py       # MMDiT implementation (SD3)
 │   ├── text_encoder/
 │   │   └── clip_encoder.py # CLIP text encoder
 │   ├── training/
 │   │   ├── train.py       # Training script
-│   │   └── ema.py         # Exponential Moving Average
+│   │   ├── ema.py         # Exponential Moving Average
+│   │   └── checkpoint.py  # Checkpoint saving/loading
 │   └── inference/
 │       └── generate.py    # Generation script
+├── scripts/
+│   ├── install.sh         # Installation script
+│   ├── train-pretrain.sh  # Pretraining script
+│   └── train-finetune.sh  # Fine-tuning script
 ├── checkpoints/           # Saved model checkpoints
 ├── samples/               # Generated samples
 └── AGENTS.md             # Developer guide
