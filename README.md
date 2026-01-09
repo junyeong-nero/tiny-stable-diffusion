@@ -242,42 +242,39 @@ uv run main.py --generate --prompt "fire" --steps 100
 
 ## 🛠️ Configuration
 
-All configuration can be done via CLI arguments. Edit `main.py` only for persistent settings:
+All configuration is managed via `config.yaml`. Edit this file to change training/generation settings:
 
-```python
-# In main.py - persistent default settings
-TRAINING_STAGE = "pretrain"  # "pretrain" or "finetune"
+```yaml
+# config.yaml
 
-PRETRAIN_CONFIG = {
-    "data_source": "cifar100",
-    "epochs": 100,
-    "batch_size": 64,
-    "learning_rate": 1e-4,
-    "checkpoint_path": "checkpoints/pretrain_cifar100.pt",
-}
+# Training stage: "pretrain" or "finetune"
+training_stage: pretrain
 
-FINETUNE_CONFIG = {
-    "data_source": "huggingface",
-    "dataset_name": "junyeong-nero/emoji-32",
-    "epochs": 100,
-    "batch_size": 16,
-    "learning_rate": 1e-5,
-    "pretrain_checkpoint": "checkpoints/pretrain_cifar100.pt",
-    "checkpoint_path": "checkpoints/finetune_emoji.pt",
-}
+# Pretraining Settings (Stage 1)
+pretrain:
+  data_source: cifar100
+  epochs: 200
+  batch_size: 4
+  learning_rate: 1.0e-4
+  ...
 
-COMMON_CONFIG = {
-    "model_size": "S",
-    "patch_size": 2,
-    "num_timesteps": 1000,
-    "beta_schedule": "cosine",
-    "guidance_scale": 7.5,
-    "use_ema": True,
-    "ema_decay": 0.9999,
-}
+# Fine-tuning Settings (Stage 2)
+finetune:
+  data_source: huggingface
+  dataset_name: junyeong-nero/emoji-32
+  epochs: 100
+  ...
+
+# Common Settings (shared by both stages)
+common:
+  model_size: S
+  patch_size: 2
+  guidance_scale: 7.5
+  use_ema: true
+  ...
 ```
 
-**CLI overrides persistent settings:**
+**CLI overrides config.yaml settings:**
 ```bash
 # Override any config value
 uv run main.py --pretrain --epochs 50 --batch-size 32 --learning-rate 1e-4
@@ -289,6 +286,7 @@ uv run main.py --finetune --checkpoint checkpoints/pretrain.pt --epochs 200
 ```
 text-to-emoji/
 ├── main.py                 # Main entry point with CLI arguments
+├── config.yaml            # Configuration file (pretrain/finetune/common settings)
 ├── src/
 │   ├── config.py          # Configuration classes
 │   ├── data/
@@ -301,6 +299,8 @@ text-to-emoji/
 │   ├── training/
 │   │   ├── train.py       # Training script
 │   │   └── ema.py         # Exponential Moving Average
+│   └── inference/
+│       └── generate.py    # Generation script
 ├── checkpoints/           # Saved model checkpoints
 ├── samples/               # Generated samples
 └── AGENTS.md             # Developer guide
