@@ -241,7 +241,7 @@ COMMON_CONFIG = {
 ## 📁 Project Structure
 
 ```
-PixMoji-Diffusion/
+text-to-emoji/
 ├── main.py                 # Main entry point (train/generate/demo)
 ├── src/
 │   ├── config.py          # Configuration classes

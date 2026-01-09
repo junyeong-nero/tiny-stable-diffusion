@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pixmoji-diffusion"
+name = "text-to-emoji"
 version = "0.1.0"
 description = "Text-to-Pixel Art Generator using Diffusion Transformer (DiT) with CLIP conditioning"
 readme = "README.md"
@@ -60,13 +60,13 @@ dev = [
 ]
 
 [project.scripts]
-pixmoji-train = "src.training.train:main"
-pixmoji-generate = "src.inference.generate:main"
+text-to-emoji-train = "src.training.train:main"
+text-to-emoji-generate = "src.inference.generate:main"
 
 [project.urls]
-Homepage = "https://github.com/your-username/pixmoji-diffusion"
-Repository = "https://github.com/your-username/pixmoji-diffusion"
-Issues = "https://github.com/your-username/pixmoji-diffusion/issues"
+Homepage = "https://github.com/your-username/text-to-emoji"
+Repository = "https://github.com/your-username/text-to-emoji"
+Issues = "https://github.com/your-username/text-to-emoji/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/"]
