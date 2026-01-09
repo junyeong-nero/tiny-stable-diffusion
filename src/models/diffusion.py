@@ -152,10 +152,20 @@ class Diffusion:
                 predicted_noise - unconditional_noise
             )
 
-        # Calculate posterior mean
+        # Predict x_0 from predicted noise
+        # x_0 = (x_t - sqrt(1 - alpha_cumprod) * noise) / sqrt(alpha_cumprod)
+        pred_x_0 = (
+            self._extract(self.sqrt_recip_alphas_cumprod, timesteps, x_t.shape) * x_t
+            - self._extract(self.sqrt_recip_alphas_cumprod_minus_1, timesteps, x_t.shape)
+            * predicted_noise
+        )
+        # Clamp to valid range for stability
+        pred_x_0 = torch.clamp(pred_x_0, -1.0, 1.0)
+
+        # Calculate posterior mean: coef1 * x_0 + coef2 * x_t
         posterior_mean = (
-            self._extract(self.posterior_mean_coef1, timesteps, x_t.shape) * x_t
-            - self._extract(self.posterior_mean_coef2, timesteps, x_t.shape) * predicted_noise
+            self._extract(self.posterior_mean_coef1, timesteps, x_t.shape) * pred_x_0
+            + self._extract(self.posterior_mean_coef2, timesteps, x_t.shape) * x_t
         )
 
         # Add noise for stochasticity (except at t=0)

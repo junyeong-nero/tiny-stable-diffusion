@@ -113,8 +113,8 @@ class TrainingConfig:
     learning_rate: float = 5e-4
     # Minimum learning rate for cosine scheduler
     min_lr: float = 1e-6
-    # Warmup steps (increased for stable training)
-    warmup_steps: int = 1000
+    # Warmup steps (reduced for small datasets - ~1 epoch worth)
+    warmup_steps: int = 100
     # Optimizer betas (AdamW)
     betas: tuple = (0.9, 0.999)
     # Optimizer epsilon
@@ -317,7 +317,7 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--learning-rate",
         type=float,
-        default=1e-4,
+        default=5e-4,
         help="Learning rate",
     )
     parser.add_argument(
@@ -393,7 +393,7 @@ def get_config(args: argparse.Namespace | None = None) -> dict:
         training_config = TrainingConfig(
             epochs=getattr(args, "epochs", 100) or 100,
             batch_size=getattr(args, "batch_size", 64) or 64,
-            learning_rate=getattr(args, "learning_rate", 1e-4) or 1e-4,
+            learning_rate=getattr(args, "learning_rate", 5e-4) or 5e-4,
             resume_from=getattr(args, "resume", None),
         )
         data_config = DataConfig(

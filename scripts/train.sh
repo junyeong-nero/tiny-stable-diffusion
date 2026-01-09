@@ -15,7 +15,7 @@ echo "========================================"
 # Default values
 EPOCHS=100
 BATCH_SIZE=8
-LEARNING_RATE=3e-4
+LEARNING_RATE=5e-4
 MODEL_SIZE="B"
 DATASET_NAME="junyeong-nero/emoji-32"
 OUTPUT_DIR="checkpoints"
