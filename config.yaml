@@ -34,7 +34,8 @@ finetune:
 
 # Common Settings (shared by both stages)
 common:
-    model_size: S
+    # Model configuration
+    model_size: S  # Options: S (30M), B (130M), L (300M), XL (675M) for DiT; ~2-3x more for MMDiT
     patch_size: 2
     num_timesteps: 1000
     beta_schedule: cosine
