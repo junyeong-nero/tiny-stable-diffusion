@@ -20,7 +20,10 @@ text-to-emoji is a multi-modal generative AI model that transforms natural langu
 
 ## 🧠 Model Architecture
 
-text-to-emoji uses **DiT (Diffusion Transformer)**, a modern architecture from "Scalable Diffusion Models with Transformers" (Google Research, 2023).
+text-to-emoji supports two transformer architectures:
+
+1. **DiT (Diffusion Transformer)** - From "Scalable Diffusion Models with Transformers" (Google Research, 2023)
+2. **MMDiT (Multi-Modal DiT)** - From Stable Diffusion 3 (Esser et al., 2024)
 
 ```
 Input Image (32×32 RGB)
@@ -31,7 +34,7 @@ Add Position Embeddings
     ↓
 DiT Blocks × 12 (transformer layers)
     ├── Self-Attention (global attention on patches)
-    ├── Cross-Attention (text conditioning)
+    ├── Cross-Attention OR Joint Attention (text conditioning)
     └── AdaLN-Zero (timestep conditioning)
     ↓
 Patch Decoder (Conv 384→3)
@@ -39,10 +42,19 @@ Patch Decoder (Conv 384→3)
 Output Image (32×32 RGB)
 ```
 
+### Architecture Comparison
+
+| Feature | DiT (Standard) | MMDiT (SD3) |
+|---------|---------------|-------------|
+| **Text Conditioning** | Cross-Attention | Joint Attention |
+| **Parameters (DiT-S)** | ~30M | ~87M |
+| **Attention** | Separate image/text attention | Unified text-image attention |
+| **Library** | Custom implementation | [lucidrains/mmdit](https://github.com/lucidrains/mmdit) |
+
 ### 1. Text Encoder (CLIP)
 
-Uses OpenAI's **CLIP** (`openai/clip-vit-base-patch32`) Text Encoder in frozen mode:
-- Converts text prompts to 77×512 embeddings
+Uses OpenAI's **CLIP** Text Encoder in frozen mode:
+- Converts text prompts to pooled embeddings (B, D)
 - Provides text conditioning for the diffusion model
 - Enables semantic understanding of natural language
 
@@ -55,13 +67,18 @@ Uses OpenAI's **CLIP** (`openai/clip-vit-base-patch32`) Text Encoder in frozen m
 
 ### 3. Model Configurations
 
-| Model | Layers | Hidden Size | Heads | Parameters |
-| :--- | :---: | :---: | :---: | :---: |
-| DiT-S | 12 | 384 | 6 | ~30M |
-| DiT-B | 12 | 768 | 12 | ~130M |
-| DiT-L | 24 | 1024 | 16 | ~300M |
+| Model | Layers | Hidden Size | Heads | DiT Params | MMDiT Params |
+|-------|--------|-------------|-------|------------|--------------|
+| DiT-S | 12 | 384 | 6 | ~30M | ~87M |
+| DiT-B | 12 | 768 | 12 | ~130M | ~300M |
+| DiT-L | 24 | 1024 | 16 | ~300M | ~675M |
 
-Default: **DiT-S** (~30M parameters) for efficient training and inference.
+Default: **DiT-S** (~30M parameters for DiT, ~87M for MMDiT) for efficient training and inference.
+
+### 4. MMDiT-Specific Features
+
+- **qk_rmsnorm**: Use RMSNorm for QK attention (recommended: true)
+- **register_tokens**: Register tokens from "Vision Transformers Need Registers" (0 or 4)
 
 ## 📂 Dataset
 
@@ -250,6 +267,9 @@ All configuration is managed via `config.yaml`. Edit this file to change trainin
 # Training stage: "pretrain" or "finetune"
 training_stage: pretrain
 
+# Model type: "dit" (standard DiT) or "mmdit" (Multi-Modal DiT from SD3)
+model_type: mmdit
+
 # Pretraining Settings (Stage 1)
 pretrain:
   data_source: cifar100
@@ -271,7 +291,10 @@ common:
   patch_size: 2
   guidance_scale: 7.5
   use_ema: true
-  ...
+
+  # MMDiT-specific settings (only used when model_type: mmdit)
+  qk_rmsnorm: true          # RMSNorm for QK attention (SD3-style)
+  register_tokens: 0        # Register tokens (0 or 4)
 ```
 
 **CLI overrides config.yaml settings:**
@@ -343,6 +366,11 @@ uv run pytest tests/
 
 - **DiT**: "Scalable Diffusion Models with Transformers" - Google Research (2023)
   - Paper: [https://arxiv.org/abs/2212.09748](https://arxiv.org/abs/2212.09748)
+- **MMDiT**: "Scaling Rectified Flow Transformers for High-Resolution Image Synthesis" - Stability AI (2024)
+  - Paper: [https://arxiv.org/abs/2403.03206](https://arxiv.org/abs/2403.03206)
+  - Implementation: [lucidrains/mmdit](https://github.com/lucidrains/mmdit)
+- **Vision Transformers Need Registers**: "Vision Transformers Need Registers" - Meta AI (2023)
+  - Paper: [https://arxiv.org/abs/2309.16588](https://arxiv.org/abs/2309.16588)
 - **DDPM**: Ho et al., "Denoising Diffusion Probabilistic Models" (2020)
 - **DDIM**: Song et al., "Denoising Diffusion Implicit Models" (2020)
 - **CFG**: Ho et al., "Classifier-Free Diffusion Guidance" (2021)
