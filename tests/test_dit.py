@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from src.models.dit import DiT
+from src.models import DiT
 
 
 class TestDiT:

@@ -9,7 +9,7 @@ from src.config import (
     ModelConfig,
     ProjectConfig,
     TrainingConfig,
-    get_config,
+    get_default_configs,
 )
 
 
@@ -112,12 +112,12 @@ class TestProjectConfig:
         assert config.seed == 42
 
 
-class TestGetConfig:
-    """Test suite for get_config function."""
+class TestGetDefaultConfigs:
+    """Test suite for get_default_configs function."""
 
     def test_default_config(self) -> None:
         """Test getting default configuration."""
-        config = get_config()
+        config = get_default_configs()
 
         assert "model" in config
         assert "diffusion" in config
