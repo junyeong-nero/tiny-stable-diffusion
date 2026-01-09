@@ -8,6 +8,9 @@ wandb/
 # Model checkpoints
 checkpoints/
 
+# Data directory (downloaded datasets)
+data/
+
 # Python-generated files
 __pycache__/
 *.py[oc]
