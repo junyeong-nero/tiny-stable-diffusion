@@ -71,14 +71,17 @@ def get_config(stage: str) -> dict[str, Any]:
         stage: Either "pretrain" or "finetune"
 
     Returns:
-        Merged configuration dictionary with common + stage-specific settings.
+        Merged configuration dictionary with top-level, common + stage-specific settings.
     """
     config = load_config()
+
+    # Get top-level settings (like model_type, training_stage)
+    top_level = {k: v for k, v in config.items() if k not in ("common", "pretrain", "finetune")}
 
     common = config.get("common", {})
     stage_config = config.get(stage, {})
 
-    return {**common, **stage_config}
+    return {**top_level, **common, **stage_config}
 
 
 # Load config once at module level for backward compatibility
@@ -258,6 +261,14 @@ def save_checkpoint(
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
+        "model_config": {
+            "model_size": config.get("model_size", "S"),
+            "patch_size": config.get("patch_size", 2),
+            "image_size": config.get("image_size", 32),
+            "model_type": config.get("model_type", "dit"),
+            "qk_rmsnorm": config.get("qk_rmsnorm", True),
+            "register_tokens": config.get("register_tokens", 0),
+        },
     }
 
     if ema is not None:
@@ -333,6 +344,9 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
         patch_size=config["patch_size"],
         model_size=config["model_size"],
         clip_embed_dim=clip_encoder.embedding_dim,
+        model_type=config.get("model_type", "dit"),
+        qk_rmsnorm=config.get("qk_rmsnorm", True),
+        register_tokens=config.get("register_tokens", 0),
     )
     model = model.to(device)
 
@@ -532,14 +546,20 @@ def generate(
     model_size = model_config.get("model_size", "S")
     patch_size = model_config.get("patch_size", 2)
     image_size = model_config.get("image_size", 32)
+    model_type = model_config.get("model_type", "dit")
+    qk_rmsnorm = model_config.get("qk_rmsnorm", True)
+    register_tokens = model_config.get("register_tokens", 0)
 
-    print(f"Initializing DiT-{model_size}...")
+    print(f"Initializing DiT-{model_size} ({model_type})...")
     model = DiT(
         in_channels=3,
         image_size=image_size,
         patch_size=patch_size,
         model_size=model_size,
         clip_embed_dim=clip_encoder.embedding_dim,
+        model_type=model_type,
+        qk_rmsnorm=qk_rmsnorm,
+        register_tokens=register_tokens,
     )
     model.load_state_dict(checkpoint["model_state_dict"])
     model = model.to(device)
@@ -565,7 +585,6 @@ def generate(
             model=model,
             shape=(num_samples, 3, image_size, image_size),
             text_embeds=text_embeds,
-            text_mask=text_mask,
             num_steps=num_steps,
             use_ddim=True,
             use_cfg=True,
@@ -614,6 +633,9 @@ def demo() -> None:
         patch_size=2,
         model_size=model_config.get("model_size", "S"),
         clip_embed_dim=clip_encoder.embedding_dim,
+        model_type=model_config.get("model_type", "dit"),
+        qk_rmsnorm=model_config.get("qk_rmsnorm", True),
+        register_tokens=model_config.get("register_tokens", 0),
     )
     model.load_state_dict(checkpoint["model_state_dict"])
     model = model.to(device)

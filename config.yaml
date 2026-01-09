@@ -5,7 +5,7 @@
 training_stage: pretrain
 
 # Model type: "dit" (Diffusion Transformer) or "mmdit" (Multi-Modal DiT from SD3)
-model_type: dit
+model_type: mmdit
 
 # Pretraining Settings (Stage 1)
 pretrain:
