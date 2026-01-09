@@ -6,7 +6,7 @@ wandb/
 
 
 # Model checkpoints
- checkpoints/
+checkpoints/
 
 # Python-generated files
 __pycache__/
