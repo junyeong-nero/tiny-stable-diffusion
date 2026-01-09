@@ -116,7 +116,12 @@ def get_dataset(config: dict[str, Any]) -> Any:
     """Create dataset based on config."""
     data_source = config["data_source"]
 
-    if data_source == "huggingface":
+    if data_source == "local":
+        local_path = config.get("local_dataset_path")
+        print(f"Loading local dataset from: {local_path}")
+        return EmojiDataset(dataset_name=local_path, split="train")
+
+    elif data_source == "huggingface":
         dataset_name = config.get("dataset_name", "junyeong-nero/emoji-32")
         print(f"Loading Hugging Face dataset: {dataset_name}")
         return EmojiDataset(dataset_name=dataset_name, split="train")
@@ -632,7 +637,7 @@ def demo() -> None:
 def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="PixMoji-Diffusion - Text-to-Emoji Generator",
+        description="text-to-emoji - Text-to-Pixel Art Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -660,17 +665,45 @@ def main() -> None:
         action="store_true",
         help="Run interactive demo",
     )
+
+    # Training arguments
     parser.add_argument(
-        "--prompt",
+        "--dataset",
         type=str,
         default=None,
-        help="Prompt for generation (use with --generate)",
+        help="Dataset path or name (e.g., 'cifar100', 'path/to/dataset', 'user/dataset-name')",
     )
     parser.add_argument(
         "--checkpoint",
         type=str,
-        default="checkpoints/model_best.pt",
-        help="Path to model checkpoint",
+        default=None,
+        help="Path to pretrained checkpoint (required for finetune)",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="Number of training epochs",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Batch size",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=None,
+        help="Learning rate",
+    )
+
+    # Generation arguments
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        default=None,
+        help="Prompt for generation",
     )
     parser.add_argument(
         "--num-samples",
@@ -702,41 +735,45 @@ def main() -> None:
         default=None,
         help="Random seed for reproducibility",
     )
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=None,
-        help="Number of training epochs (overrides config)",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=None,
-        help="Batch size (overrides config)",
-    )
-    parser.add_argument(
-        "--learning-rate",
-        type=float,
-        default=None,
-        help="Learning rate (overrides config)",
-    )
 
     args = parser.parse_args()
 
     if args.pretrain:
         config = {**COMMON_CONFIG, **PRETRAIN_CONFIG}
         # Override with CLI args if provided
+        if args.dataset is not None:
+            if Path(args.dataset).exists():
+                # Local dataset path
+                config["data_source"] = "local"
+                config["local_dataset_path"] = args.dataset
+            else:
+                # HuggingFace dataset name
+                config["data_source"] = "huggingface"
+                config["dataset_name"] = args.dataset
         if args.epochs is not None:
             config["epochs"] = args.epochs
         if args.batch_size is not None:
             config["batch_size"] = args.batch_size
         if args.learning_rate is not None:
             config["learning_rate"] = args.learning_rate
+        if args.checkpoint is not None:
+            config["checkpoint_path"] = args.checkpoint
         train(config)
 
     elif args.finetune:
         config = {**COMMON_CONFIG, **FINETUNE_CONFIG}
         # Override with CLI args if provided
+        if args.dataset is not None:
+            if Path(args.dataset).exists():
+                # Local dataset path
+                config["data_source"] = "local"
+                config["local_dataset_path"] = args.dataset
+            else:
+                # HuggingFace dataset name
+                config["data_source"] = "huggingface"
+                config["dataset_name"] = args.dataset
+        if args.checkpoint is not None:
+            config["pretrain_checkpoint"] = args.checkpoint
         if args.epochs is not None:
             config["epochs"] = args.epochs
         if args.batch_size is not None:

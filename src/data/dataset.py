@@ -451,9 +451,21 @@ class CIFAR100Dataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
+        # Validate label index
+        if label < 0 or label >= len(self.fine_labels):
+            raise IndexError(
+                f"Label index {label} is out of range for fine_labels (size={len(self.fine_labels)}). "
+                "This may indicate a corrupted or incompatible dataset."
+            )
+
         # Get text label
         if self.use_coarse_labels:
-            coarse_label = self.coarse_labels[self.fine_to_coarse[label]]
+            coarse_idx = self.fine_to_coarse[label]
+            if coarse_idx < 0 or coarse_idx >= len(self.coarse_labels):
+                raise IndexError(
+                    f"Coarse label index {coarse_idx} is out of range (size={len(self.coarse_labels)})."
+                )
+            coarse_label = self.coarse_labels[coarse_idx]
             caption = coarse_label.replace("_", " ")
         else:
             caption = self.fine_labels[label]

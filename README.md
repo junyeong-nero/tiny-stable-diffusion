@@ -1,4 +1,4 @@
-# 🎨 PixMoji-Diffusion: Text-to-Pixel Art Generator
+# 🎨 text-to-emoji: Text-to-Pixel Art Generator
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange) ![License](https://img.shields.io/badge/License-MIT-green)
 
@@ -7,7 +7,7 @@
 
 ## 📖 Introduction
 
-PixMoji-Diffusion is a multi-modal generative AI model that transforms natural language descriptions into 32×32 pixel art emojis. Built with state-of-the-art diffusion transformer technology, it produces high-quality, text-conditioned imagery suitable for Discord/Slack emojis, game sprites, or any retro-styled creative project.
+text-to-emoji is a multi-modal generative AI model that transforms natural language descriptions into 32×32 pixel art emojis. Built with state-of-the-art diffusion transformer technology, it produces high-quality, text-conditioned imagery suitable for Discord/Slack emojis, game sprites, or any retro-styled creative project.
 
 ### ✨ Key Features
 
@@ -20,7 +20,7 @@ PixMoji-Diffusion is a multi-modal generative AI model that transforms natural l
 
 ## 🧠 Model Architecture
 
-PixMoji-Diffusion uses **DiT (Diffusion Transformer)**, a modern architecture from "Scalable Diffusion Models with Transformers" (Google Research, 2023).
+text-to-emoji uses **DiT (Diffusion Transformer)**, a modern architecture from "Scalable Diffusion Models with Transformers" (Google Research, 2023).
 
 ```
 Input Image (32×32 RGB)
@@ -94,24 +94,35 @@ uv sync
 
 **Stage 1: Pretrain** (CIFAR-100)
 ```bash
-# CIFAR-100 (60K images)
-./pretraining.sh
+# CIFAR-100 (60K images) - default dataset
+uv run main.py --pretrain --epochs 100 --batch-size 64
+
+# With custom dataset (local path or HuggingFace)
+uv run main.py --pretrain --dataset /path/to/dataset
+uv run main.py --pretrain --dataset user/dataset-name
 ```
 
 **Stage 2: Fine-tune on Emoji**
 ```bash
-# First, edit main.py: TRAINING_STAGE = "finetune"
-./finetuning.sh
+# Default emoji dataset with pretrained checkpoint
+uv run main.py --finetune \
+    --checkpoint checkpoints/pretrain_cifar100.pt \
+    --epochs 100 \
+    --batch-size 16
+
+# With custom dataset
+uv run main.py --finetune \
+    --dataset user/my-emoji-dataset \
+    --checkpoint checkpoints/pretrain_cifar100.pt
 ```
 
-### Direct Training
+### Interactive Demo
 
 ```bash
-# Edit main.py to configure your settings
-python main.py --train       # Training
-python main.py --generate    # Generation
-python main.py --demo        # Interactive demo
+uv run main.py --demo
 ```
+
+Enter prompts to generate images interactively. Type 'quit' to exit.
 
 ## 📖 Training Guide
 
@@ -121,19 +132,18 @@ For best results with limited emoji data, use the two-stage approach:
 
 **Stage 1: Pretraining** (CIFAR-100)
 
-```python
-# In main.py
-TRAINING_STAGE = "pretrain"
+```bash
+# Default: CIFAR-100 with recommended settings
+uv run main.py --pretrain --epochs 100 --batch-size 64
 
-PRETRAIN_CONFIG = {
-    "data_source": "cifar100",
-    "epochs": 50,
-    "batch_size": 64,
-    "learning_rate": 1e-4,
-    "initial_cfg_prob": 0.0,     # Start unconditional
-    "final_cfg_prob": 0.1,       # Gradually add conditioning
-    "cfg_warmup_epochs": 10,
-}
+# Override hyperparameters
+uv run main.py --pretrain \
+    --epochs 50 \
+    --batch-size 64 \
+    --learning-rate 1e-4
+
+# Use custom dataset
+uv run main.py --pretrain --dataset /path/to/images
 ```
 
 | Dataset | Images | Best For |
@@ -141,48 +151,53 @@ PRETRAIN_CONFIG = {
 | **CIFAR-100** ⭐ | 60,000 | Quick experiments, limited storage |
 
 **Stage 2: Fine-tuning**
-```python
-# In main.py
-TRAINING_STAGE = "finetune"
+```bash
+# Default: Emoji-32 dataset with pretrained checkpoint
+uv run main.py --finetune \
+    --checkpoint checkpoints/pretrain_cifar100.pt \
+    --epochs 100 \
+    --batch-size 16
 
-FINETUNE_CONFIG = {
-    "data_source": "huggingface",
-    "dataset_name": "junyeong-nero/emoji-32",
-    "epochs": 100,
-    "batch_size": 16,
-    "learning_rate": 1e-5,
-    "cfg_prob": 0.1,
-    "pretrain_checkpoint": "checkpoints/pretrain_cifar100.pt",
-}
+# Override hyperparameters
+uv run main.py --finetune \
+    --checkpoint checkpoints/pretrain_cifar100.pt \
+    --epochs 200 \
+    --batch-size 16 \
+    --learning-rate 1e-5
+
+# Use custom dataset
+uv run main.py --finetune \
+    --dataset user/my-emoji-dataset \
+    --checkpoint checkpoints/pretrain_cifar100.pt
 ```
 
 ### Training Arguments
 
 | Argument | Description | Default |
 | :--- | :--- | :--- |
-| `--epochs` | Number of training epochs | 100 |
-| `--batch-size` | Batch size | 64 |
-| `--learning-rate` | Learning rate | 1e-4 |
-| `--model-size` | DiT model size: XS, S, B, L, XL | S |
-| `--data-source` | Dataset: huggingface, cifar100 | huggingface |
+| `--epochs` | Number of training epochs | config default |
+| `--batch-size` | Batch size | config default |
+| `--learning-rate` | Learning rate | config default |
+| `--dataset` | Dataset path or name | config default |
+| `--checkpoint` | Pretrained checkpoint path (finetune only) | config default |
 
 ### Generating Images
 
 ```bash
 # Single prompt
-python main.py --generate --prompt "a cute robot"
+uv run main.py --generate --prompt "a cute robot"
 
 # Multiple prompts (comma-separated)
-python main.py --generate --prompt "rocket,cat,ghost"
+uv run main.py --generate --prompt "rocket,cat,ghost"
 
 # With custom checkpoint
-python main.py --generate --prompt "star" --checkpoint checkpoints/model_best.pt
+uv run main.py --generate --prompt "star" --checkpoint checkpoints/model_best.pt
 
 # Multiple samples
-python main.py --generate --prompt "heart" --num-samples 4
+uv run main.py --generate --prompt "heart" --num-samples 4
 
 # Custom sampling steps
-python main.py --generate --prompt "fire" --steps 100
+uv run main.py --generate --prompt "fire" --steps 100
 ```
 
 **Generation Arguments**:
@@ -198,35 +213,30 @@ python main.py --generate --prompt "fire" --steps 100
 
 ## 🛠️ Configuration
 
-All configuration is done in `main.py`:
+All configuration can be done via CLI arguments. Edit `main.py` only for persistent settings:
 
 ```python
-# Training stage: "pretrain" or "finetune"
-TRAINING_STAGE = "pretrain"
+# In main.py - persistent default settings
+TRAINING_STAGE = "pretrain"  # "pretrain" or "finetune"
 
-# Pretraining on CIFAR-100
 PRETRAIN_CONFIG = {
     "data_source": "cifar100",
     "epochs": 100,
     "batch_size": 64,
     "learning_rate": 1e-4,
-    "initial_cfg_prob": 0.0,
-    "final_cfg_prob": 0.1,
-    "cfg_warmup_epochs": 20,
+    "checkpoint_path": "checkpoints/pretrain_cifar100.pt",
 }
 
-# Fine-tuning on Emoji
 FINETUNE_CONFIG = {
     "data_source": "huggingface",
     "dataset_name": "junyeong-nero/emoji-32",
     "epochs": 100,
     "batch_size": 16,
     "learning_rate": 1e-5,
-    "cfg_prob": 0.1,
     "pretrain_checkpoint": "checkpoints/pretrain_cifar100.pt",
+    "checkpoint_path": "checkpoints/finetune_emoji.pt",
 }
 
-# Common settings
 COMMON_CONFIG = {
     "model_size": "S",
     "patch_size": 2,
@@ -238,11 +248,18 @@ COMMON_CONFIG = {
 }
 ```
 
+**CLI overrides persistent settings:**
+```bash
+# Override any config value
+uv run main.py --pretrain --epochs 50 --batch-size 32 --learning-rate 1e-4
+uv run main.py --finetune --checkpoint checkpoints/pretrain.pt --epochs 200
+```
+
 ## 📁 Project Structure
 
 ```
 text-to-emoji/
-├── main.py                 # Main entry point (train/generate/demo)
+├── main.py                 # Main entry point with CLI arguments
 ├── src/
 │   ├── config.py          # Configuration classes
 │   ├── data/
@@ -255,10 +272,6 @@ text-to-emoji/
 │   ├── training/
 │   │   ├── train.py       # Training script
 │   │   └── ema.py         # Exponential Moving Average
-│   └── inference/
-│       └── generate.py    # Generation script
-├── scripts/
-│   └── convert_pretrain_to_finetune.py  # Checkpoint conversion
 ├── checkpoints/           # Saved model checkpoints
 ├── samples/               # Generated samples
 └── AGENTS.md             # Developer guide
