@@ -320,6 +320,13 @@ def main() -> None:
     clip_encoder = clip_encoder.to(device)
     clip_encoder.eval()
 
+    # Compute unconditional embedding for classifier-free guidance
+    print("Computing unconditional embedding...")
+    with torch.no_grad():
+        uncond_embed, uncond_mask = clip_encoder.encode([""])
+    uncond_embed = uncond_embed.to(device)
+    uncond_mask = uncond_mask.to(device) if uncond_mask is not None else None
+
     # Initialize model
     print(f"Initializing DiT-{config['model_size']}...")
     model = DiT(
@@ -352,6 +359,8 @@ def main() -> None:
         beta_schedule=config["beta_schedule"],
         guidance_scale=config["guidance_scale"],
         cfg_probability=config.get("cfg_prob", 0.1),
+        uncond_embed=uncond_embed,
+        uncond_mask=uncond_mask,
     )
 
     # Optimizer

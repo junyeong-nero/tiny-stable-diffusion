@@ -290,6 +290,13 @@ def train(config: dict[str, Any]) -> None:
     clip_encoder = clip_encoder.to(device)
     clip_encoder.eval()
 
+    # Compute unconditional embedding for classifier-free guidance (empty string)
+    print("Computing unconditional embedding...")
+    with torch.no_grad():
+        uncond_embed, uncond_mask = clip_encoder.encode([""])
+    uncond_embed = uncond_embed.to(device)
+    uncond_mask = uncond_mask.to(device) if uncond_mask is not None else None
+
     print(f"Initializing DiT-{config['model_size']}...")
     model = DiT(
         in_channels=3,
@@ -318,6 +325,8 @@ def train(config: dict[str, Any]) -> None:
         beta_schedule=config["beta_schedule"],
         guidance_scale=config["guidance_scale"],
         cfg_probability=config.get("cfg_prob", config.get("initial_cfg_prob", 0.1)),
+        uncond_embed=uncond_embed,
+        uncond_mask=uncond_mask,
     )
 
     optimizer = torch.optim.AdamW(
@@ -465,6 +474,12 @@ def generate(
     clip_encoder = clip_encoder.to(device)
     clip_encoder.eval()
 
+    # Compute unconditional embedding for classifier-free guidance
+    with torch.no_grad():
+        uncond_embed, uncond_mask = clip_encoder.encode([""])
+    uncond_embed = uncond_embed.to(device)
+    uncond_mask = uncond_mask.to(device) if uncond_mask is not None else None
+
     print(f"Loading checkpoint: {checkpoint}")
     checkpoint = torch.load(checkpoint, map_location=device)
 
@@ -489,6 +504,8 @@ def generate(
         num_timesteps=1000,
         beta_schedule="cosine",
         guidance_scale=guidance_scale,
+        uncond_embed=uncond_embed,
+        uncond_mask=uncond_mask,
     )
 
     print(f"\nGenerating {num_samples} image(s) for {len(prompts)} prompt(s)...")
@@ -541,6 +558,12 @@ def demo() -> None:
     clip_encoder = clip_encoder.to(device)
     clip_encoder.eval()
 
+    # Compute unconditional embedding for classifier-free guidance
+    with torch.no_grad():
+        uncond_embed, uncond_mask = clip_encoder.encode([""])
+    uncond_embed = uncond_embed.to(device)
+    uncond_mask = uncond_mask.to(device) if uncond_mask is not None else None
+
     checkpoint = torch.load(checkpoint, map_location=device)
     model_config = checkpoint.get("model_config", {})
     model = DiT(
@@ -554,7 +577,13 @@ def demo() -> None:
     model = model.to(device)
     model.eval()
 
-    diffusion = Diffusion(num_timesteps=1000, beta_schedule="cosine", guidance_scale=7.5)
+    diffusion = Diffusion(
+        num_timesteps=1000,
+        beta_schedule="cosine",
+        guidance_scale=7.5,
+        uncond_embed=uncond_embed,
+        uncond_mask=uncond_mask,
+    )
 
     while True:
         try:
@@ -607,9 +636,19 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
+        "--pretrain",
+        action="store_true",
+        help="Run pretraining on CIFAR-100",
+    )
+    parser.add_argument(
+        "--finetune",
+        action="store_true",
+        help="Run fine-tuning on emoji dataset",
+    )
+    parser.add_argument(
         "--train",
         action="store_true",
-        help="Train the model",
+        help="Train the model (uses TRAINING_STAGE from config)",
     )
     parser.add_argument(
         "--generate",
@@ -663,11 +702,51 @@ def main() -> None:
         default=None,
         help="Random seed for reproducibility",
     )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="Number of training epochs (overrides config)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Batch size (overrides config)",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=None,
+        help="Learning rate (overrides config)",
+    )
 
     args = parser.parse_args()
 
-    if args.train:
-        # Select config based on TRAINING_STAGE
+    if args.pretrain:
+        config = {**COMMON_CONFIG, **PRETRAIN_CONFIG}
+        # Override with CLI args if provided
+        if args.epochs is not None:
+            config["epochs"] = args.epochs
+        if args.batch_size is not None:
+            config["batch_size"] = args.batch_size
+        if args.learning_rate is not None:
+            config["learning_rate"] = args.learning_rate
+        train(config)
+
+    elif args.finetune:
+        config = {**COMMON_CONFIG, **FINETUNE_CONFIG}
+        # Override with CLI args if provided
+        if args.epochs is not None:
+            config["epochs"] = args.epochs
+        if args.batch_size is not None:
+            config["batch_size"] = args.batch_size
+        if args.learning_rate is not None:
+            config["learning_rate"] = args.learning_rate
+        train(config)
+
+    elif args.train:
+        # Select config based on TRAINING_STAGE constant
         if TRAINING_STAGE == "pretrain":
             config = {**COMMON_CONFIG, **PRETRAIN_CONFIG}
         else:
