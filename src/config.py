@@ -148,17 +148,21 @@ class TrainingConfig:
 class DataConfig:
     """Data configuration.
 
-    Uses junyeong-nero/emoji-32 dataset from Hugging Face.
-    Images are already 32x32 RGB, no resizing needed.
+    Supports multiple datasets:
+    - huggingface: junyeong-nero/emoji-32 or other HF datasets
+    - cifar100: torchvision CIFAR-100 dataset
+    - local: Local image files
+
+    Images are resized to 32x32 for all datasets.
     """
 
-    # Dataset source: "huggingface" or "local"
+    # Dataset source: "huggingface", "cifar100", or "local"
     source: str = "huggingface"
     # Hugging Face dataset name
     dataset_name: str = "junyeong-nero/emoji-32"
     # Dataset split (train, validation, test)
     split: str = "train"
-    # Image resolution (no resize needed for emoji-32)
+    # Image resolution (resized to this size)
     image_size: int = 32
     # Number of data loading workers (0 = main process)
     num_workers: int = 0
@@ -170,6 +174,10 @@ class DataConfig:
     cache_dir: str = "~/.cache/pixmoji"
     # Use streaming mode for large datasets
     streaming: bool = False
+
+    # CIFAR-100 specific options
+    # Use coarse labels (20 classes) instead of fine labels (100 classes)
+    use_coarse_labels: bool = False
 
     # Data augmentation
     use_augmentation: bool = True

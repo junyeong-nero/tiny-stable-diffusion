@@ -61,16 +61,12 @@ class TestEMA:
         # Shadow params should have changed
         for name in ema.shadow_params:
             # Due to EMA update, shadow should be between old and new
-            assert not torch.allclose(
-                ema.shadow_params[name], original_shadow[name], atol=1e-6
-            )
+            assert not torch.allclose(ema.shadow_params[name], original_shadow[name], atol=1e-6)
 
     def test_apply_and_restore(self, model: SimpleModel, ema: EMA) -> None:
         """Test apply_shadow and restore."""
         # Store original model params
-        original_params = {
-            name: param.data.clone() for name, param in model.named_parameters()
-        }
+        original_params = {name: param.data.clone() for name, param in model.named_parameters()}
 
         # Modify model
         with torch.no_grad():

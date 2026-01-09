@@ -88,9 +88,7 @@ class TestDiffusion:
         # so x_t should be close to x_0
         assert torch.allclose(x_t, x_0, atol=0.1)
 
-    def test_training_loss(
-        self, diffusion: Diffusion, dummy_model: SimpleDummyModel
-    ) -> None:
+    def test_training_loss(self, diffusion: Diffusion, dummy_model: SimpleDummyModel) -> None:
         """Test training loss computation."""
         x_0 = torch.randn(2, 3, 32, 32)
         timesteps = torch.randint(0, 1000, (2,))

@@ -83,9 +83,7 @@ class EMA:
             for name, param in self.model.named_parameters():
                 if param.requires_grad and name in self.shadow_params:
                     # EMA update: shadow = decay * shadow + (1 - decay) * param
-                    self.shadow_params[name].mul_(decay).add_(
-                        param.data, alpha=1 - decay
-                    )
+                    self.shadow_params[name].mul_(decay).add_(param.data, alpha=1 - decay)
 
     def apply_shadow(self) -> None:
         """Apply EMA weights to model (for inference).

@@ -37,11 +37,14 @@ uv run pytest -k "test_forward" tests/
 ### Linting and Formatting
 
 ```bash
-# Check code style (auto-fix enabled)
+# Check code style with ruff
 uv run ruff check src/ tests/
 
-# Format code
+# Format code with ruff
 uv run ruff format src/ tests/
+
+# Format code with black
+uv run black src/ tests/
 
 # Type checking
 uv run mypy src/
@@ -53,8 +56,37 @@ uv run pre-commit run --all-files
 ### Training and Inference
 
 ```bash
-# Train model
+# Train model with default emoji dataset
 uv run python src/training/train.py --epochs 100 --batch-size 64
+
+# Train with CIFAR-100 dataset (60,000 images)
+uv run python src/training/train.py \
+    --data-source cifar100 \
+    --epochs 100 \
+    --batch-size 64 \
+    --learning-rate 1e-4
+
+# Train with CIFAR-100 using coarse labels (20 classes)
+uv run python src/training/train.py \
+    --data-source cifar100 \
+    --use-coarse-labels \
+    --epochs 200 \
+    --batch-size 128
+
+# Fine-tune on emoji dataset using pretrained checkpoint
+uv run python src/training/train.py \
+    --data-source huggingface \
+    --dataset-name junyeong-nero/emoji-32 \
+    --epochs 100 \
+    --batch-size 16 \
+    --learning-rate 1e-5 \
+    --pretrain-checkpoint checkpoints/pretrain_cifar100.pt
+
+# Convert pretrained checkpoint for fine-tuning
+python scripts/convert_pretrain_to_finetune.py \
+    --input checkpoints/pretrain_cifar100.pt \
+    --output checkpoints/finetune.pt \
+    --reset-cross-attn
 
 # Or use convenience script
 ./scripts/train.sh --epochs 100 --batch-size 64 --mixed-precision
@@ -89,12 +121,14 @@ from src.config import ModelConfig
 from src.models.diffusion import Diffusion
 ```
 
-### Formatting Rules (ruff)
+### Formatting Rules (black)
 
 - **Line length**: 100 characters max
 - **Quote style**: Double quotes (`"`)
 - **Indentation**: 4 spaces (no tabs)
 - **Trailing commas**: Keep them for multi-line structures
+
+Both `black` and `ruff format` produce consistent results. Use either:
 
 ### Type Hints (mypy)
 
@@ -215,9 +249,10 @@ class TestDiffusion:
 ## 🔧 Pre-commit Hooks
 
 Installed hooks (run automatically on `git commit`):
-- `ruff` - Linting and formatting
-- `ruff-format` - Code formatting
-- `mypy` - Type checking (excludes tests/)
+- `black` - Python code formatting
+- `ruff` - Linting
+- `ruff-format` - Code formatting- `mypy` - Type checking
+ (excludes tests/)
 - `trailing-whitespace` - Remove trailing spaces
 - `end-of-file-fixer` - Ensure newline at EOF
 - `check-yaml` - Validate YAML files

@@ -37,9 +37,7 @@ class PatchEmbed(nn.Module):
         self.num_patches = num_patches
 
         # Conv2D projection: (C, H, W) -> (D, H/p, W/p)
-        self.proj = nn.Conv2d(
-            in_channels, hidden_size, kernel_size=patch_size, stride=patch_size
-        )
+        self.proj = nn.Conv2d(in_channels, hidden_size, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass.
@@ -90,7 +88,9 @@ class AdaLNZero(nn.Module):
             nn.Linear(hidden_size, num_layers * hidden_size * 3),  # scale, shift, gate
         )
 
-    def forward(self, temb: torch.Tensor) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    def forward(
+        self, temb: torch.Tensor
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
         """Project timestep embedding to per-block parameters.
 
         Args:
@@ -167,6 +167,7 @@ class DiTBlock(nn.Module):
         self,
         x: torch.Tensor,
         text_embeds: torch.Tensor | None = None,
+        text_mask: torch.Tensor | None = None,
         scale: torch.Tensor | None = None,
         shift: torch.Tensor | None = None,
         gate: torch.Tensor | None = None,
@@ -176,6 +177,7 @@ class DiTBlock(nn.Module):
         Args:
             x: Input tokens (B, N, D)
             text_embeds: Text conditioning (B, L, D), optional
+            text_mask: Attention mask for text (B, L), optional (True = attend)
             scale: AdaLN scale parameter (B, 1, D)
             shift: AdaLN shift parameter (B, 1, D)
             gate: AdaLN gate parameter (B, 1, D)
@@ -195,7 +197,36 @@ class DiTBlock(nn.Module):
         # Cross-Attention with text conditioning
         if text_embeds is not None:
             x_norm = self.norm2(x)
-            x_cross, _ = self.cross_attn(x_norm, text_embeds, text_embeds)
+            # Use attention mask if provided to ignore padding tokens
+            if text_mask is not None:
+                # text_mask shape: (B, L) where 1 = real token, 0 = padding/unconditional
+                # Convert to boolean: True = attend, False = skip
+                text_mask_bool = text_mask.bool()  # (B, L)
+
+                # Check if ALL samples have at least one valid token
+                all_have_valid = text_mask_bool.all(dim=-1)  # (B,)
+
+                if all_have_valid.all():
+                    # All samples have valid tokens, use standard attention
+                    x_cross, _ = self.cross_attn(x_norm, text_embeds, text_embeds)
+                else:
+                    # Some samples have no valid tokens (CFG dropout)
+                    # We need to handle this carefully to avoid NaN
+                    # Strategy: For samples with valid tokens, compute attention normally
+                    # For samples with no valid tokens, skip cross-attention
+
+                    # Compute full cross-attention for all samples
+                    x_cross_all, attn_weights = self.cross_attn(x_norm, text_embeds, text_embeds)
+
+                    # Zero out cross-attention output for samples with no valid tokens
+                    # text_mask_bool[:, 0:1] gives us a (B, 1) mask, we need to broadcast to (B, N, D)
+                    valid_mask = text_mask_bool.any(dim=-1, keepdim=True)  # (B, 1)
+                    valid_mask_expanded = valid_mask.unsqueeze(
+                        -1
+                    )  # (B, 1, 1) -> will broadcast to (B, N, D)
+                    x_cross = x_cross_all * valid_mask_expanded
+            else:
+                x_cross, _ = self.cross_attn(x_norm, text_embeds, text_embeds)
             x = x + x_cross
 
         # MLP with optional AdaLN-Zero
@@ -289,9 +320,7 @@ class DiT(nn.Module):
         self.clip_embed_dim = clip_embed_dim
 
         # Patch embedding
-        self.patch_embed = PatchEmbed(
-            in_channels, self.hidden_size, patch_size, image_size
-        )
+        self.patch_embed = PatchEmbed(in_channels, self.hidden_size, patch_size, image_size)
         self.num_patches = self.patch_embed.num_patches
 
         # Position embedding
@@ -311,16 +340,18 @@ class DiT(nn.Module):
         self.ada_ln_zero = AdaLNZero(self.hidden_size, self.num_layers)
 
         # DiT blocks
-        self.blocks = nn.ModuleList([
-            DiTBlock(
-                self.hidden_size,
-                self.num_heads,
-                mlp_ratio,
-                attn_dropout,
-                mlp_dropout,
-            )
-            for _ in range(self.num_layers)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                DiTBlock(
+                    self.hidden_size,
+                    self.num_heads,
+                    mlp_ratio,
+                    attn_dropout,
+                    mlp_dropout,
+                )
+                for _ in range(self.num_layers)
+            ]
+        )
 
         # Final layer
         self.final_layer = FinalLayer(self.hidden_size, patch_size, in_channels)
@@ -371,6 +402,7 @@ class DiT(nn.Module):
         x: torch.Tensor,
         timestep: torch.Tensor,
         text_embeds: torch.Tensor,
+        text_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Forward pass.
 
@@ -378,6 +410,7 @@ class DiT(nn.Module):
             x: Noisy image (B, C, H, W)
             timestep: Diffusion timestep (B,) or timestep embedding
             text_embeds: Text embeddings from CLIP (B, L, D_clip)
+            text_mask: Attention mask for text (B, L), optional (True = attend)
 
         Returns:
             Predicted noise (B, C, H, W)
@@ -389,9 +422,7 @@ class DiT(nn.Module):
         if isinstance(timestep, torch.Tensor) and timestep.dim() == 1:
             timestep = self._get_timestep_embedding(timestep)
         elif not isinstance(timestep, torch.Tensor):
-            timestep = self._get_timestep_embedding(
-                torch.tensor([timestep], device=x.device)
-            )
+            timestep = self._get_timestep_embedding(torch.tensor([timestep], device=x.device))
 
         timestep = self.timestep_embed(timestep)  # (B, D)
 
@@ -407,6 +438,7 @@ class DiT(nn.Module):
             x = block(
                 x,
                 text_embeds=text_embeds,
+                text_mask=text_mask,
                 scale=scales[i],
                 shift=shifts[i],
                 gate=gates[i],
@@ -432,14 +464,18 @@ class DiT(nn.Module):
             Timestep embedding (B, D)
         """
         half = self.hidden_size // 2
+        # Use the same dtype as the model parameters for consistency
+        model_dtype = self.dtype
+        model_device = next(self.parameters()).device
+
         freqs = torch.exp(
             -math.log(max_period)
-            * torch.arange(half, dtype=torch.float32, device=timesteps.device)
+            * torch.arange(half, dtype=model_dtype, device=model_device)
             / half
         )
         args = timesteps[:, None].float() * freqs[None]
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-        return embedding.to(dtype=self.dtype)
+        return embedding.to(dtype=model_dtype)
 
     @property
     def dtype(self) -> torch.dtype:
@@ -466,10 +502,15 @@ class DiT(nn.Module):
             "num_heads": self.num_heads,
             "num_parameters": self.parameters_count(),
             "estimated_size": MODEL_CONFIGS.get(
-                next((k for k, v in {
-                    "S": 384, "B": 768, "L": 1024, "XL": 1152
-                }.items() if v == self.hidden_size), "S"),
-                "~30M"
+                next(
+                    (
+                        k
+                        for k, v in {"S": 384, "B": 768, "L": 1024, "XL": 1152}.items()
+                        if v == self.hidden_size
+                    ),
+                    "S",
+                ),
+                "~30M",
             ),
         }
 

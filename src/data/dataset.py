@@ -1,7 +1,10 @@
 """Data loading and preprocessing for emoji dataset.
 
-Uses the junyeong-nero/emoji-32 dataset from Hugging Face.
-Images are already 32x32 RGB, no resizing needed.
+Supports multiple datasets:
+- junyeong-nero/emoji-32: Custom emoji dataset (32x32)
+- CIFAR-100: General image classification dataset (32x32)
+
+Images are already 32x32 RGB, no resizing needed for both.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
+from torchvision.datasets import CIFAR100
 
 
 class EmojiDataset(Dataset):
@@ -155,6 +159,315 @@ class EmojiDataset(Dataset):
         )
 
 
+class CIFAR100Dataset(Dataset):
+    """CIFAR-100 dataset wrapper for text-to-image generation.
+
+    Uses CIFAR-100 coarse or fine labels as text prompts.
+
+    Dataset source: torchvision.datasets.CIFAR100
+
+    Features:
+        - 60,000 images (32x32 RGB)
+        - 100 classes (20 superclasses)
+        - Can use either coarse or fine labels as text conditioning
+    """
+
+    def __init__(
+        self,
+        root: str = "data",
+        train: bool = True,
+        use_coarse_labels: bool = False,
+        transform: Callable | None = None,
+        download: bool = True,
+    ) -> None:
+        super().__init__()
+        self.root = Path(root)
+        self.train = train
+        self.use_coarse_labels = use_coarse_labels
+
+        # CIFAR-100 class names
+        self.fine_labels = [
+            "apple",
+            "aquarium_fish",
+            "baby",
+            "bear",
+            "beaver",
+            "bed",
+            "bee",
+            "beetle",
+            "bicycle",
+            "bottle",
+            "bowl",
+            "boy",
+            "bridge",
+            "bus",
+            "butterfly",
+            "camel",
+            "can",
+            "castle",
+            "caterpillar",
+            "chair",
+            "chicken",
+            "cloud",
+            "cockroach",
+            "couch",
+            "crab",
+            "crocodile",
+            "cup",
+            "dinosaur",
+            "dolphin",
+            "elephant",
+            "flatfish",
+            "forest",
+            "fox",
+            "girl",
+            "hamster",
+            "house",
+            "kangaroo",
+            "keyboard",
+            "lamp",
+            "lawn_mower",
+            "leopard",
+            "lion",
+            "lizard",
+            "lobster",
+            "man",
+            "maple_tree",
+            "motorcycle",
+            "mountain",
+            "mouse",
+            "mushroom",
+            "oak_tree",
+            "orange",
+            "orchid",
+            "otter",
+            "palm_tree",
+            "pear",
+            "pickup_truck",
+            "pine_tree",
+            "plain",
+            "plate",
+            "poppy",
+            "porcupine",
+            "possum",
+            "rabbit",
+            "raccoon",
+            "ray",
+            "road",
+            "rocket",
+            "rose",
+            "sea",
+            "seal",
+            "shark",
+            "shrew",
+            "skunk",
+            "skyscraper",
+            "snail",
+            "snake",
+            "spider",
+            "squirrel",
+            "streetcar",
+            "sunflower",
+            "sweet_pepper",
+            "table",
+            "tank",
+            "telephone",
+            "television",
+            "tiger",
+            "tractor",
+            "train",
+            "trout",
+            "tulip",
+            "turtle",
+            "wardrobe",
+            "whale",
+            "willow_tree",
+            "wolf",
+            "woman",
+            "worm",
+        ]
+
+        self.coarse_labels = [
+            "aquatic_mammals",
+            "fish",
+            "flowers",
+            "food_containers",
+            "fruit_and_vegetables",
+            "household_electrical_devices",
+            "household_furniture",
+            "insects",
+            "large_carnivores",
+            "large_man-made_outdoor_things",
+            "large_natural_outdoor_scenes",
+            "large_omnivores_and_herbivores",
+            "medium_sized_mammals",
+            "non-insect_invertebrates",
+            "people",
+            "reptiles",
+            "small_mammals",
+            "trees",
+            "vehicles_1",
+            "vehicles_2",
+        ]
+
+        # Coarse label mapping (fine -> coarse)
+        self.fine_to_coarse = [
+            4,
+            1,
+            14,
+            8,
+            0,
+            6,
+            7,
+            3,
+            2,
+            15,
+            11,
+            17,
+            5,
+            10,
+            4,
+            13,
+            12,
+            16,
+            9,
+            5,
+            10,
+            11,
+            10,
+            10,
+            8,
+            4,
+            3,
+            2,
+            9,
+            15,
+            14,
+            6,
+            7,
+            1,
+            13,
+            5,
+            6,
+            3,
+            18,
+            17,
+            12,
+            18,
+            4,
+            11,
+            16,
+            0,
+            15,
+            2,
+            17,
+            8,
+            14,
+            13,
+            12,
+            18,
+            1,
+            9,
+            11,
+            5,
+            3,
+            6,
+            15,
+            0,
+            2,
+            7,
+            4,
+            19,
+            6,
+            16,
+            5,
+            8,
+            9,
+            10,
+            10,
+            11,
+            3,
+            15,
+            7,
+            18,
+            19,
+            14,
+            12,
+            19,
+            2,
+            13,
+            16,
+            17,
+            18,
+            2,
+            4,
+            6,
+            11,
+            8,
+            2,
+            12,
+            1,
+            8,
+            4,
+            7,
+            0,
+            16,
+            12,
+            17,
+            3,
+            19,
+            15,
+            4,
+            9,
+            14,
+            1,
+            2,
+        ]
+
+        # Load CIFAR-100
+        self.dataset = CIFAR100(
+            root=str(self.root),
+            train=train,
+            transform=transform,
+            download=download,
+        )
+
+        if transform is None:
+            self.transform = transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+                ]
+            )
+        else:
+            self.transform = transform
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor | str]:
+        image, label = self.dataset[idx]
+
+        if self.transform:
+            image = self.transform(image)
+
+        # Get text label
+        if self.use_coarse_labels:
+            coarse_label = self.coarse_labels[self.fine_to_coarse[label]]
+            caption = coarse_label.replace("_", " ")
+        else:
+            caption = self.fine_labels[label]
+
+        return {
+            "image": image,
+            "caption": caption,
+        }
+
+    def __repr__(self) -> str:
+        label_type = "coarse" if self.use_coarse_labels else "fine"
+        return f"CIFAR100Dataset(train={self.train}, labels={label_type}, num_samples={len(self)})"
+
+
 class LocalEmojiDataset(Dataset):
     """Local emoji dataset for offline training."""
 
@@ -218,10 +531,24 @@ class LocalEmojiDataset(Dataset):
 
 def get_dataset(
     dataset_source: str = "huggingface",
+    dataset_name: str = "junyeong-nero/emoji-32",
     **kwargs,
 ) -> Dataset:
+    """Get dataset by source type.
+
+    Args:
+        dataset_source: Source type - "huggingface", "cifar100", or "local"
+        dataset_name: Dataset name (for HuggingFace) or path (for local)
+        **kwargs: Additional arguments for specific datasets
+
+    Returns:
+        Dataset instance
+    """
     if dataset_source == "huggingface":
-        return EmojiDataset(**kwargs)
+        return EmojiDataset(dataset_name=dataset_name, **kwargs)
+    elif dataset_source == "cifar100":
+        use_coarse = kwargs.get("use_coarse_labels", False)
+        return CIFAR100Dataset(use_coarse_labels=use_coarse, **kwargs)
     else:
         return LocalEmojiDataset(**kwargs)
 

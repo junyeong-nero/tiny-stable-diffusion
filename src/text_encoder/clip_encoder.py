@@ -61,14 +61,16 @@ class CLIPTextEncoder(nn.Module):
         """Get dtype."""
         return next(self.model.parameters()).dtype
 
-    def forward(self, text: str | list[str]) -> torch.Tensor:
+    def forward(self, text: str | list[str]) -> tuple[torch.Tensor, torch.Tensor]:
         """Encode text to embeddings.
 
         Args:
             text: Single string or list of strings
 
         Returns:
-            Text embeddings (B, L, D) where B=batch, L=77, D=768
+            Tuple of (text_embeddings, attention_mask):
+                - text_embeddings: Text embeddings (B, L, D) where B=batch, L=77, D=768
+                - attention_mask: Attention mask (B, L) where 1 = real token, 0 = padding
         """
         if isinstance(text, str):
             text = [text]
@@ -90,13 +92,13 @@ class CLIPTextEncoder(nn.Module):
             outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
             embeddings = outputs.last_hidden_state  # (B, L, D)
 
-        return embeddings
+        return embeddings, attention_mask
 
     def encode(
         self,
         text: str | list[str],
         batch_size: int = 32,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Encode text in batches.
 
         Args:
@@ -104,18 +106,22 @@ class CLIPTextEncoder(nn.Module):
             batch_size: Batch size for encoding
 
         Returns:
-            Text embeddings
+            Tuple of (all_embeddings, all_masks):
+                - all_embeddings: Text embeddings (B, L, D)
+                - all_masks: Attention masks (B, L) where 1 = real token, 0 = padding
         """
         if isinstance(text, str):
             text = [text]
 
         all_embeddings = []
+        all_masks = []
         for i in range(0, len(text), batch_size):
             batch = text[i : i + batch_size]
-            embeddings = self.forward(batch)
+            embeddings, mask = self.forward(batch)
             all_embeddings.append(embeddings)
+            all_masks.append(mask)
 
-        return torch.cat(all_embeddings, dim=0)
+        return torch.cat(all_embeddings, dim=0), torch.cat(all_masks, dim=0)
 
     def train(self, mode: bool = False) -> "CLIPTextEncoder":
         """Set training mode (always False, model is frozen)."""
@@ -189,12 +195,13 @@ if __name__ == "__main__":
     encoder = CLIPTextEncoder()
 
     # Test single prompt
-    embedding = encoder("a cute robot")
-    print(f"Single prompt: {embedding.shape}")
+    embedding, mask = encoder("a cute robot")
+    print(f"Single prompt: embedding={embedding.shape}, mask={mask.shape}")
 
     # Test batch
     prompts = ["a robot", "a cat", "an apple", "a ghost"]
-    embeddings = encoder.encode(prompts)
-    print(f"Batch prompts: {embeddings.shape}")
+    embeddings, masks = encoder.encode(prompts)
+    print(f"Batch prompts: embeddings={embeddings.shape}, masks={masks.shape}")
+    print(f"Mask example (first sample): {masks[0]}")
 
     print(f"\n{encoder}")

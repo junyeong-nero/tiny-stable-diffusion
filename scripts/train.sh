@@ -14,14 +14,14 @@ echo "========================================"
 
 # Default values
 EPOCHS=100
-BATCH_SIZE=8
+BATCH_SIZE=16
 LEARNING_RATE=5e-4
-MODEL_SIZE="B"
+MODEL_SIZE="S"
 DATASET_NAME="junyeong-nero/emoji-32"
 OUTPUT_DIR="checkpoints"
 DEVICE="auto"
 RESUME=""
-USE_MIXED_PRECISION=true
+USE_MIXED_PRECISION=false
 USE_WANDB=false
 
 # Parse arguments

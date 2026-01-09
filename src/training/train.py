@@ -1,29 +1,113 @@
-"""Training script for PixMoji-Diffusion."""
+#!/usr/bin/env python3
+"""PixMoji-Diffusion Training Script.
+
+Two-stage training pipeline:
+- Stage 1: Pretrain on CIFAR-100 with text conditioning
+- Stage 2: Fine-tune on emoji dataset
+
+Usage:
+    python train.py
+
+Configure training settings in the CONFIG section below.
+"""
 
 from __future__ import annotations
 
 import math
+import os
 import random
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from PIL import Image
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.config import (
-    DataConfig,
-    DiffusionConfig,
-    ModelConfig,
-    ProjectConfig,
-    TrainingConfig,
-    get_parser,
-)
-from src.data.dataset import EmojiDataset
+# Import from local modules
+from src.config import DataConfig, DiffusionConfig, ModelConfig, TrainingConfig
+from src.data.dataset import CIFAR100Dataset, EmojiDataset
 from src.models.diffusion import Diffusion
 from src.models.dit import DiT
 from src.text_encoder.clip_encoder import CLIPTextEncoder
 from src.training.ema import EMA
+
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Training Stage: "pretrain" or "finetune"
+# -----------------------------------------------------------------------------
+TRAINING_STAGE: str = "pretrain"  # "pretrain" or "finetune"
+
+# -----------------------------------------------------------------------------
+# Pretraining Settings (Stage 1)
+# -----------------------------------------------------------------------------
+PRETRAIN_CONFIG: dict[str, Any] = {
+    "data_source": "cifar100",
+    "epochs": 100,
+    "batch_size": 64,
+    "learning_rate": 1e-4,
+    "image_size": 32,
+    # CFG (Classifier-Free Guidance) settings
+    "initial_cfg_prob": 0.0,  # Start with 0 (unconditional)
+    "final_cfg_prob": 0.1,  # End with 0.1 (10% dropout)
+    "cfg_warmup_epochs": 20,  # Warmup over 20 epochs
+    # Checkpoint
+    "checkpoint_path": "checkpoints/pretrain_cifar100.pt",
+}
+
+# -----------------------------------------------------------------------------
+# Fine-tuning Settings (Stage 2)
+# -----------------------------------------------------------------------------
+FINETUNE_CONFIG: dict[str, Any] = {
+    "data_source": "huggingface",
+    "dataset_name": "junyeong-nero/emoji-32",
+    "epochs": 100,
+    "batch_size": 16,
+    "learning_rate": 1e-5,
+    "image_size": 32,
+    # CFG settings (keep higher for fine-tuning)
+    "cfg_prob": 0.1,
+    # Load pretrained weights
+    "pretrain_checkpoint": "checkpoints/pretrain_cifar100.pt",
+    "reset_cross_attention": True,  # Reset cross-attention for fine-tuning
+}
+
+# -----------------------------------------------------------------------------
+# Common Settings
+# -----------------------------------------------------------------------------
+COMMON_CONFIG: dict[str, Any] = {
+    "model_size": "S",  # DiT model size: "XS", "S", "B", "L", "XL"
+    "patch_size": 2,
+    "num_timesteps": 1000,
+    "beta_schedule": "cosine",
+    "guidance_scale": 7.5,
+    "use_ema": True,
+    "ema_decay": 0.9999,
+    "mixed_precision": False,
+    "device": "auto",  # "auto", "cuda", "mps", "cpu"
+    "seed": 42,
+    "validation_prompts": [
+        "rocket",
+        "cat",
+        "robot",
+        "star",
+        "heart",
+    ],
+    "validation_interval": 5,
+    "sample_dir": "samples",
+    "checkpoint_dir": "checkpoints",
+}
+
+
+# =============================================================================
+# TRAINING CODE
+# =============================================================================
 
 
 def set_seed(seed: int) -> None:
@@ -36,210 +120,186 @@ def set_seed(seed: int) -> None:
 
 def get_device(device: str) -> torch.device:
     """Get torch device."""
-    if device == "cuda":
-        return torch.device("cuda")
-    elif device == "mps":
-        return torch.device("mps")
+    if device == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            return torch.device("mps")
+        else:
+            return torch.device("cpu")
+    return torch.device(device)
+
+
+def get_dataset(config: dict[str, Any]) -> Any:
+    """Create dataset based on config."""
+    data_source = config["data_source"]
+
+    if data_source == "huggingface":
+        dataset_name = config.get("dataset_name", "junyeong-nero/emoji-32")
+        print(f"Loading Hugging Face dataset: {dataset_name}")
+        return EmojiDataset(dataset_name=dataset_name, split="train")
+
+    elif data_source == "cifar100":
+        print("Loading CIFAR-100 dataset")
+        return CIFAR100Dataset(train=True, use_coarse_labels=False)
+
     else:
-        return torch.device("cpu")
+        raise ValueError(f"Unknown data_source: {data_source}")
 
 
-def generate_validation_samples(
+def train_one_epoch(
+    model: nn.Module,
+    diffusion: Diffusion,
+    dataloader: DataLoader,
+    clip_encoder: CLIPTextEncoder,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LambdaLR,
+    ema: EMA | None,
+    device: torch.device,
+    cfg_prob: float,
+    use_amp: bool = False,
+    scaler: torch.cuda.amp.GradScaler | None = None,
+) -> float:
+    """Train for one epoch."""
+    model.train()
+    epoch_loss = 0.0
+
+    progress_bar = tqdm(dataloader, desc="Training")
+
+    for batch in progress_bar:
+        images = batch["image"].to(device)
+        captions = batch["caption"]
+
+        # Get text embeddings and attention mask
+        with torch.no_grad():
+            text_embeds, text_mask = clip_encoder.encode(captions)
+            text_embeds = text_embeds.to(device)
+            text_mask = text_mask.to(device)
+
+        # Random timesteps
+        timesteps = torch.randint(
+            0,
+            diffusion.num_timesteps,
+            (images.shape[0],),
+            device=device,
+        )
+
+        optimizer.zero_grad()
+
+        if use_amp and device.type == "cuda":
+            with torch.cuda.amp.autocast():
+                loss = diffusion.training_loss(model, images, timesteps, text_embeds, text_mask)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss = diffusion.training_loss(model, images, timesteps, text_embeds, text_mask)
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+
+        scheduler.step()
+
+        if ema is not None:
+            ema.update()
+
+        epoch_loss += loss.item()
+        progress_bar.set_postfix({"loss": loss.item()})
+
+    return epoch_loss / len(dataloader)
+
+
+@torch.no_grad()
+def generate_samples(
     model: nn.Module,
     diffusion: Diffusion,
     clip_encoder: CLIPTextEncoder,
     prompts: list[str],
     device: torch.device,
-    num_steps: int = 50,
     guidance_scale: float = 7.5,
 ) -> torch.Tensor:
-    """Generate validation samples from prompts.
-
-    Args:
-        model: DiT model.
-        diffusion: Diffusion process.
-        clip_encoder: CLIP text encoder.
-        prompts: List of text prompts.
-        device: Device to generate on.
-        num_steps: Number of sampling steps.
-        guidance_scale: Classifier-free guidance scale.
-
-    Returns:
-        Generated images tensor (B, C, H, W) in [0, 1] range.
-    """
+    """Generate validation samples."""
     model.eval()
-    with torch.no_grad():
-        text_embeds = clip_encoder.encode(prompts)
 
-        # Set guidance scale temporarily
-        original_scale = diffusion.guidance_scale
-        diffusion.guidance_scale = guidance_scale
+    text_embeds, text_mask = clip_encoder.encode(prompts)
+    text_embeds = text_embeds.to(device)
+    text_mask = text_mask.to(device)
 
-        images = diffusion.sample(
-            model=model,
-            shape=(len(prompts), 3, 32, 32),
-            text_embeds=text_embeds,
-            num_steps=num_steps,
-            use_ddim=True,
-            use_cfg=True,
-        )
+    original_scale = diffusion.guidance_scale
+    diffusion.guidance_scale = guidance_scale
 
-        diffusion.guidance_scale = original_scale
+    images = diffusion.sample(
+        model=model,
+        shape=(len(prompts), 3, 32, 32),
+        text_embeds=text_embeds,
+        text_mask=text_mask,
+        num_steps=50,
+        use_ddim=True,
+        use_cfg=True,
+    )
 
-    model.train()
+    diffusion.guidance_scale = original_scale
     return images
 
 
-def save_validation_images(
-    images: torch.Tensor,
-    prompts: list[str],
-    output_dir: Path,
+def save_checkpoint(
+    model: nn.Module,
+    ema: EMA | None,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LambdaLR,
     epoch: int,
-    suffix: str = "",
+    loss: float,
+    path: str,
 ) -> None:
-    """Save validation images to disk.
+    """Save training checkpoint."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
 
-    Args:
-        images: Generated images (B, C, H, W) in [0, 1] range.
-        prompts: List of prompts used.
-        output_dir: Directory to save images.
-        epoch: Current epoch number.
-        suffix: Optional suffix for filename (e.g., '_ema').
-    """
-    import numpy as np
-    from PIL import Image
+    checkpoint = {
+        "epoch": epoch,
+        "loss": loss,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
+    }
 
-    samples_dir = output_dir / "samples"
-    samples_dir.mkdir(parents=True, exist_ok=True)
+    if ema is not None:
+        checkpoint["ema_state_dict"] = ema.state_dict()
 
-    for i, (img, prompt) in enumerate(zip(images, prompts, strict=True)):
-        # Convert to PIL Image
-        img_np = (img.cpu().numpy() * 255).astype(np.uint8)
-        img_np = img_np.transpose(1, 2, 0)  # CHW -> HWC
-        pil_img = Image.fromarray(img_np)
-
-        # Upscale with nearest neighbor for pixel art
-        pil_img = pil_img.resize((256, 256), Image.NEAREST)
-
-        # Save with sanitized prompt name
-        safe_prompt = prompt.replace(" ", "_")[:30]
-        filename = f"epoch{epoch:03d}_{i}_{safe_prompt}{suffix}.png"
-        pil_img.save(samples_dir / filename)
+    torch.save(checkpoint, path)
+    print(f"✓ Saved checkpoint: {path}")
 
 
 def main() -> None:
     """Main training function."""
-    parser = get_parser()
-    parser.add_argument(
-        "--data-source",
-        type=str,
-        default="huggingface",
-        choices=["huggingface", "local"],
-        help="Dataset source: huggingface or local",
-    )
-    parser.add_argument(
-        "--dataset-name",
-        type=str,
-        default="junyeong-nero/emoji-32",
-        help="Hugging Face dataset name",
-    )
-    parser.add_argument(
-        "--split",
-        type=str,
-        default="train",
-        help="Dataset split (train, validation, test)",
-    )
-    parser.add_argument(
-        "--streaming",
-        action="store_true",
-        default=False,
-        help="Use streaming mode for large datasets",
-    )
-    parser.add_argument(
-        "--wandb",
-        action="store_true",
-        default=False,
-        help="Enable Weights & Biases logging",
-    )
-    parser.add_argument(
-        "--use-ema",
-        action="store_true",
-        default=True,
-        help="Use Exponential Moving Average for model weights",
-    )
-    parser.add_argument(
-        "--ema-decay",
-        type=float,
-        default=0.9999,
-        help="EMA decay rate",
-    )
-    parser.add_argument(
-        "--validation-interval",
-        type=int,
-        default=5,
-        help="Generate validation samples every N epochs",
-    )
-    parser.add_argument(
-        "--mixed-precision",
-        action="store_true",
-        default=False,
-        help="Enable mixed precision training (fp16/bf16)",
-    )
-    parser.add_argument(
-        "--amp-dtype",
-        type=str,
-        default="float16",
-        choices=["float16", "bfloat16"],
-        help="AMP dtype for mixed precision training",
-    )
-    args = parser.parse_args()
+    # Select config based on stage
+    if TRAINING_STAGE == "pretrain":
+        config = {**COMMON_CONFIG, **PRETRAIN_CONFIG}
+        print("=" * 60)
+        print("STAGE 1: PRETRAINING")
+        print("=" * 60)
+    else:
+        config = {**COMMON_CONFIG, **FINETUNE_CONFIG}
+        print("=" * 60)
+        print("STAGE 2: FINE-TUNING")
+        print("=" * 60)
+
+    # Print config
+    print("\nConfiguration:")
+    for key, value in config.items():
+        print(f"  {key}: {value}")
+    print()
 
     # Set random seed
-    set_seed(args.seed or 42)
+    set_seed(config["seed"])
 
     # Get device
-    device = get_device(args.device or "auto")
+    device = get_device(config["device"])
     print(f"Using device: {device}")
 
-    # Load configurations
-    model_config = ModelConfig(
-        model_size=getattr(args, "model_size", "S") or "S",
-        patch_size=getattr(args, "patch_size", 2) or 2,
-    )
-    diffusion_config = DiffusionConfig()
-    training_config = TrainingConfig(
-        epochs=getattr(args, "epochs", 100) or 100,
-        batch_size=getattr(args, "batch_size", 64) or 64,
-        learning_rate=getattr(args, "learning_rate", 5e-4) or 5e-4,
-    )
-    data_config = DataConfig(
-        source=getattr(args, "data_source", "huggingface") or "huggingface",
-        dataset_name=getattr(args, "dataset_name", "junyeong-nero/emoji-32")
-        or "junyeong-nero/emoji-32",
-        split=getattr(args, "split", "train") or "train",
-        streaming=getattr(args, "streaming", False) or False,
-    )
-
-    # Create output directory
-    output_dir = Path(getattr(args, "output_dir", "checkpoints") or "checkpoints")
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     # Load dataset
-    if data_config.source == "huggingface":
-        print(f"Loading Hugging Face dataset: {data_config.dataset_name}")
-        dataset = EmojiDataset(
-            dataset_name=data_config.dataset_name,
-            split=data_config.split,
-            streaming=data_config.streaming,
-        )
-    else:
-        print("Loading local dataset from: data/")
-        from src.data.dataset import LocalEmojiDataset
-
-        dataset = LocalEmojiDataset(
-            data_dir="data",
-        )
-
+    dataset = get_dataset(config)
     print(f"Dataset size: {len(dataset)}")
 
     if len(dataset) == 0:
@@ -248,10 +308,10 @@ def main() -> None:
 
     dataloader = DataLoader(
         dataset,
-        batch_size=training_config.batch_size,
+        batch_size=config["batch_size"],
         shuffle=True,
-        num_workers=data_config.num_workers,
-        pin_memory=data_config.pin_memory,
+        num_workers=0,
+        pin_memory=True,
     )
 
     # Load CLIP encoder
@@ -261,343 +321,153 @@ def main() -> None:
     clip_encoder.eval()
 
     # Initialize model
-    print(f"Initializing DiT-{model_config.model_size}...")
+    print(f"Initializing DiT-{config['model_size']}...")
     model = DiT(
-        in_channels=model_config.in_channels,
-        image_size=model_config.image_size,
-        patch_size=model_config.patch_size,
-        model_size=model_config.model_size,
+        in_channels=3,
+        image_size=config["image_size"],
+        patch_size=config["patch_size"],
+        model_size=config["model_size"],
         clip_embed_dim=clip_encoder.embedding_dim,
     )
     model = model.to(device)
 
-    # Print model info
-    model_info = model.get_model_size_info()
-    print(f"Model parameters: {model_info['num_parameters']:,}")
+    # Load pretrained checkpoint if specified
+    pretrain_checkpoint = config.get("pretrain_checkpoint")
+    if pretrain_checkpoint and Path(pretrain_checkpoint).exists():
+        print(f"Loading pretrained checkpoint: {pretrain_checkpoint}")
+        checkpoint = torch.load(pretrain_checkpoint, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        print("✓ Pretrained weights loaded")
 
     # Initialize EMA
     ema = None
-    if getattr(args, "use_ema", True):
-        ema_decay = getattr(args, "ema_decay", 0.9999)
-        ema = EMA(model, decay=ema_decay)
+    if config["use_ema"]:
+        ema = EMA(model, decay=config["ema_decay"])
         ema.to(device)
-        print(f"EMA enabled with decay={ema_decay}")
-
-    # Initialize wandb
-    project_config = ProjectConfig(
-        name=getattr(args, "name", None) or "pixmoji-diffusion",
-        experiment_name=getattr(args, "name", None) or f"dit-{model_config.model_size}",
-        seed=args.seed or 42,
-        use_wandb=getattr(args, "wandb", False) or False,
-    )
-
-    wandb_run = None
-    if project_config.use_wandb:
-        try:
-            import wandb
-
-            wandb.login()
-            wandb_run = wandb.init(
-                project=project_config.name,
-                name=project_config.experiment_name,
-                config={
-                    "model_size": model_config.model_size,
-                    "patch_size": model_config.patch_size,
-                    "image_size": model_config.image_size,
-                    "epochs": training_config.epochs,
-                    "batch_size": training_config.batch_size,
-                    "learning_rate": training_config.learning_rate,
-                    "num_timesteps": diffusion_config.num_timesteps,
-                    "beta_schedule": diffusion_config.beta_schedule,
-                    "guidance_scale": diffusion_config.guidance_scale,
-                    "cfg_probability": diffusion_config.cfg_probability,
-                    "dataset": data_config.dataset_name,
-                    "seed": project_config.seed,
-                    "use_ema": getattr(args, "use_ema", True),
-                    "ema_decay": getattr(args, "ema_decay", 0.9999),
-                },
-            )
-            print(f"Initialized W&B: {wandb.run.url}")
-        except ImportError:
-            print("wandb not installed. Install with: pip install wandb")
-        except Exception as e:
-            print(f"Failed to initialize wandb: {e}")
+        print(f"EMA enabled with decay={config['ema_decay']}")
 
     # Initialize diffusion
     diffusion = Diffusion(
-        num_timesteps=diffusion_config.num_timesteps,
-        beta_schedule=diffusion_config.beta_schedule,
-        guidance_scale=diffusion_config.guidance_scale,
-        cfg_probability=diffusion_config.cfg_probability,
+        num_timesteps=config["num_timesteps"],
+        beta_schedule=config["beta_schedule"],
+        guidance_scale=config["guidance_scale"],
+        cfg_probability=config.get("cfg_prob", 0.1),
     )
 
     # Optimizer
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=training_config.learning_rate,
-        betas=training_config.betas,
-        eps=training_config.eps,
-        weight_decay=training_config.weight_decay,
+        lr=config["learning_rate"],
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0.0,
     )
 
-    # Learning rate scheduler with warmup
+    # Learning rate scheduler
     num_steps_per_epoch = len(dataloader)
-    total_steps = training_config.epochs * num_steps_per_epoch
-    warmup_steps = training_config.warmup_steps
+    total_steps = config["epochs"] * num_steps_per_epoch
+    warmup_steps = total_steps // 20  # 5% warmup
 
     def lr_lambda(step: int) -> float:
-        """Learning rate schedule: warmup + cosine decay."""
         if step < warmup_steps:
             return float(step) / float(max(1, warmup_steps))
         else:
             progress = float(step - warmup_steps) / float(max(1, total_steps - warmup_steps))
             return 0.5 * (1.0 + math.cos(math.pi * progress))
 
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer,
-        lr_lambda=lr_lambda,
-    )
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
-    # Validation prompts
-    validation_prompts = [
-        "rocket",
-        "cat",
-        "robot",
-        "star",
-    ]
-    validation_interval = getattr(args, "validation_interval", 5)
-
-    # Track best loss
-    best_loss = float("inf")
-
-    # Mixed precision training setup
-    use_amp = getattr(args, "mixed_precision", False)
-    amp_dtype_str = getattr(args, "amp_dtype", "float16")
-    amp_dtype = torch.float16 if amp_dtype_str == "float16" else torch.bfloat16
-
+    # Mixed precision
+    use_amp = config["mixed_precision"] and device.type == "cuda"
+    scaler = torch.cuda.amp.GradScaler() if use_amp else None
     if use_amp:
-        if device.type == "cuda":
-            print(f"Mixed precision training enabled with {amp_dtype}")
-            scaler = torch.cuda.amp.GradScaler()
-        elif device.type == "mps" and amp_dtype == torch.float16:
-            print("Mixed precision training enabled with float16 (MPS)")
-            scaler = None  # MPS doesn't need GradScaler
-        else:
-            print("Warning: Mixed precision not fully supported on this device, disabling")
-            use_amp = False
-            scaler = None
-    else:
-        scaler = None
+        print("Mixed precision training enabled")
+
+    # Get current CFG probability
+    initial_cfg = config.get("initial_cfg_prob", 0.0)
+    final_cfg = config.get("final_cfg_prob", 0.0)
+    cfg_warmup = config.get("cfg_warmup_epochs", 0)
+
+    diffusion.cfg_probability = initial_cfg
+    print(f"Initial CFG probability: {initial_cfg}")
 
     # Training loop
-    print(f"Starting training for {training_config.epochs} epochs...")
-    for epoch in range(training_config.epochs):
-        model.train()
-        epoch_loss = 0.0
+    print(f"\nStarting training for {config['epochs']} epochs...")
+    best_loss = float("inf")
 
-        progress_bar = tqdm(
-            dataloader,
-            desc=f"Epoch {epoch + 1}/{training_config.epochs}",
+    for epoch in range(config["epochs"]):
+        # CFG warmup
+        if cfg_warmup > 0 and epoch < cfg_warmup:
+            progress = epoch / cfg_warmup
+            current_cfg = initial_cfg + (final_cfg - initial_cfg) * progress
+            diffusion.cfg_probability = current_cfg
+            if epoch % 10 == 0:
+                print(f"  CFG warmup: {current_cfg:.3f} (epoch {epoch}/{cfg_warmup})")
+        elif cfg_warmup > 0:
+            diffusion.cfg_probability = final_cfg
+
+        # Train
+        avg_loss = train_one_epoch(
+            model=model,
+            diffusion=diffusion,
+            dataloader=dataloader,
+            clip_encoder=clip_encoder,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            ema=ema,
+            device=device,
+            cfg_prob=diffusion.cfg_probability,
+            use_amp=use_amp,
+            scaler=scaler,
         )
 
-        for batch in progress_bar:
-            images = batch["image"].to(device)
-            captions = batch["caption"]
+        print(f"Epoch {epoch + 1}/{config['epochs']}: Avg Loss = {avg_loss:.4f}")
 
-            # Get text embeddings
-            with torch.no_grad():
-                text_embeds = clip_encoder.encode(captions)
-
-            timesteps = torch.randint(
-                0,
-                diffusion.num_timesteps,
-                (images.shape[0],),
-                device=device,
-            )
-
-            optimizer.zero_grad()
-
-            if use_amp and device.type == "cuda":
-                with torch.cuda.amp.autocast(dtype=amp_dtype):
-                    loss = diffusion.training_loss(model, images, timesteps, text_embeds)
-
-                scaler.scale(loss).backward()
-
-                if training_config.gradient_clip_val > 0:
-                    scaler.unscale_(optimizer)
-                    nn.utils.clip_grad_norm_(
-                        model.parameters(),
-                        training_config.gradient_clip_val,
-                    )
-
-                scaler.step(optimizer)
-                scaler.update()
-            elif use_amp and device.type == "mps":
-                with torch.autocast(device_type="mps", dtype=amp_dtype):
-                    loss = diffusion.training_loss(model, images, timesteps, text_embeds)
-
-                loss.backward()
-
-                if training_config.gradient_clip_val > 0:
-                    nn.utils.clip_grad_norm_(
-                        model.parameters(),
-                        training_config.gradient_clip_val,
-                    )
-
-                optimizer.step()
-            else:
-                loss = diffusion.training_loss(model, images, timesteps, text_embeds)
-                loss.backward()
-
-                if training_config.gradient_clip_val > 0:
-                    nn.utils.clip_grad_norm_(
-                        model.parameters(),
-                        training_config.gradient_clip_val,
-                    )
-
-                optimizer.step()
-
-            scheduler.step()
-
-            # Update EMA
-            if ema is not None:
-                ema.update()
-
-            epoch_loss += loss.item()
-            progress_bar.set_postfix({"loss": loss.item()})
-
-        avg_loss = epoch_loss / len(dataloader)
-        print(f"Epoch {epoch + 1}: Avg Loss = {avg_loss:.4f}")
-
-        # Track best model
-        is_best = avg_loss < best_loss
-        if is_best:
+        # Save checkpoint
+        checkpoint_path = config["checkpoint_path"]
+        if avg_loss < best_loss:
             best_loss = avg_loss
-
-        # Log to wandb
-        if wandb_run is not None:
-            import wandb
-
-            wandb.log(
-                {
-                    "train_loss": avg_loss,
-                    "learning_rate": scheduler.get_last_lr()[0],
-                    "epoch": epoch + 1,
-                }
+            save_checkpoint(
+                model=model,
+                ema=ema,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                epoch=epoch,
+                loss=avg_loss,
+                path=checkpoint_path,
             )
 
         # Generate validation samples
-        if (epoch + 1) % validation_interval == 0:
-            print("Generating validation samples...")
-
-            # Generate with training model
-            val_images = generate_validation_samples(
+        if (epoch + 1) % config["validation_interval"] == 0:
+            print(f"\nGenerating validation samples...")
+            samples = generate_samples(
                 model=model,
                 diffusion=diffusion,
                 clip_encoder=clip_encoder,
-                prompts=validation_prompts,
+                prompts=config["validation_prompts"],
                 device=device,
+                guidance_scale=config["guidance_scale"],
             )
-            save_validation_images(val_images, validation_prompts, output_dir, epoch + 1)
 
-            # Generate with EMA model if available
-            if ema is not None:
-                ema.apply_shadow()
-                ema_images = generate_validation_samples(
-                    model=model,
-                    diffusion=diffusion,
-                    clip_encoder=clip_encoder,
-                    prompts=validation_prompts,
-                    device=device,
-                )
-                save_validation_images(
-                    ema_images, validation_prompts, output_dir, epoch + 1, suffix="_ema"
-                )
-                ema.restore()
+            # Save samples
+            sample_dir = Path(config["sample_dir"]) / f"epoch_{epoch + 1}"
+            sample_dir.mkdir(parents=True, exist_ok=True)
 
-            # Log images to wandb
-            if wandb_run is not None:
-                import wandb
+            for i, prompt in enumerate(config["validation_prompts"]):
+                img = samples[i]
+                img = (img + 1) / 2  # Denormalize
+                img = img.permute(1, 2, 0).mul(255).clamp(0, 255).to(torch.uint8).cpu().numpy()
+                img = Image.fromarray(img)
+                safe_prompt = prompt.replace(" ", "_")[:20]
+                img.save(sample_dir / f"{i:02d}_{safe_prompt}.png")
 
-                wandb.log(
-                    {
-                        "validation_samples": [
-                            wandb.Image(img.cpu(), caption=prompt)
-                            for img, prompt in zip(val_images, validation_prompts, strict=True)
-                        ],
-                        "epoch": epoch + 1,
-                    }
-                )
+            print(f"✓ Saved samples to {sample_dir}")
 
-            print(f"Validation samples saved to {output_dir / 'samples'}")
-
-        # Save checkpoint
-        if (epoch + 1) % training_config.checkpoint_interval == 0:
-            checkpoint_path = output_dir / f"checkpoint_epoch_{epoch + 1}.pt"
-            checkpoint_data = {
-                "epoch": epoch + 1,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict(),
-                "loss": avg_loss,
-                "model_config": {
-                    "model_size": model_config.model_size,
-                    "patch_size": model_config.patch_size,
-                    "image_size": model_config.image_size,
-                },
-            }
-            if ema is not None:
-                checkpoint_data["ema_state_dict"] = ema.state_dict()
-
-            torch.save(checkpoint_data, checkpoint_path)
-            print(f"Saved checkpoint: {checkpoint_path}")
-
-        # Save best model
-        if is_best and training_config.save_best:
-            best_path = output_dir / "model_best.pt"
-            best_data = {
-                "epoch": epoch + 1,
-                "model_state_dict": model.state_dict(),
-                "loss": avg_loss,
-                "model_config": {
-                    "model_size": model_config.model_size,
-                    "patch_size": model_config.patch_size,
-                    "image_size": model_config.image_size,
-                },
-            }
-            if ema is not None:
-                best_data["ema_state_dict"] = ema.state_dict()
-
-            torch.save(best_data, best_path)
-            print(f"Saved best model (loss={avg_loss:.4f}): {best_path}")
-
-    # Save final model
-    final_path = output_dir / "model_final.pt"
-    final_data = {
-        "epoch": training_config.epochs,
-        "model_state_dict": model.state_dict(),
-        "model_config": {
-            "model_size": model_config.model_size,
-            "patch_size": model_config.patch_size,
-            "image_size": model_config.image_size,
-        },
-    }
-    if ema is not None:
-        final_data["ema_state_dict"] = ema.state_dict()
-
-    torch.save(final_data, final_path)
-    print(f"Saved final model: {final_path}")
-
-    # Finish wandb
-    if wandb_run is not None:
-        import wandb
-
-        artifact = wandb.Artifact("pixmoji-model", type="model")
-        artifact.add_file(str(final_path))
-        wandb.log_artifact(artifact)
-
-        wandb.finish()
-        print("W&B run finished")
+    print("\n" + "=" * 60)
+    print("Training complete!")
+    print(f"Best loss: {best_loss:.4f}")
+    print(f"Checkpoint: {config['checkpoint_path']}")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

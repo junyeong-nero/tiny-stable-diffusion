@@ -44,12 +44,16 @@ def get_transforms(
             ),
         ]
         # Insert augmentations before ToTensor
-        transform_list = [
-            transforms.Resize((image_size, image_size)),
-        ] + augmentations + [
-            transforms.ToTensor(),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-        ]
+        transform_list = (
+            [
+                transforms.Resize((image_size, image_size)),
+            ]
+            + augmentations
+            + [
+                transforms.ToTensor(),
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+            ]
+        )
 
     return transforms.Compose(transform_list)
 
@@ -63,11 +67,13 @@ def get_inference_transform(image_size: int = 32) -> transforms.Compose:
     Returns:
         Transforms for inference
     """
-    return transforms.Compose([
-        transforms.Resize((image_size, image_size)),
-        transforms.ToTensor(),
-        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-    ])
+    return transforms.Compose(
+        [
+            transforms.Resize((image_size, image_size)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+        ]
+    )
 
 
 def denormalize(tensor: torch.Tensor) -> torch.Tensor:

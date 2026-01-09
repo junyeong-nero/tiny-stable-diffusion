@@ -16,6 +16,7 @@ PixMoji-Diffusion is a multi-modal generative AI model that transforms natural l
 - **Diffusion Transformer (DiT)**: Modern transformer-based architecture with AdaLN-Zero conditioning
 - **Fast Sampling**: DDIM (Denoising Diffusion Implicit Models) for rapid generation
 - **Classifier-Free Guidance (CFG)**: Enhanced prompt adherence for more accurate results
+- **Two-Stage Training**: Pretrain on CIFAR-100, fine-tune on emoji data
 
 ## 🧠 Model Architecture
 
@@ -64,163 +65,239 @@ Default: **DiT-S** (~30M parameters) for efficient training and inference.
 
 ## 📂 Dataset
 
-Training uses the **junyeong-neo/emoji-32** dataset from Hugging Face:
+Supports multiple datasets for flexible training:
 
+### 1. Emoji Dataset (Fine-tuning)
 - **Source**: [junyeong-nero/emoji-32](https://huggingface.co/datasets/junyeong-nero/emoji-32)
-- **Size**: ~10,000 emoji images
-- **Resolution**: 32×32 RGB (pre-processed, no resize needed)
-- **Captions**: Emoji short names (e.g., "rocket", "cat", "apple")
-- **Format**: PIL Images from Hugging Face `datasets` library
+- **Size**: ~1,900 emoji images
+- **Resolution**: 32×32 RGB
 
-### Dataset Structure
+### 2. CIFAR-100 (Pretraining)
+- **Source**: torchvision.datasets.CIFAR100
+- **Size**: 60,000 images
+- **Classes**: 100 (or 20 coarse categories)
+- **Use Case**: Quick pretraining, general visual concepts
 
-```python
-{
-    "image_apple": PIL.Image (32×32, RGBA),
-    "short_name": str,  # e.g., "rocket"
-    "category": str,    # e.g., "Activities"
-    "subcategory": str, # e.g., "event"
-}
-```
+## 🚀 Quick Start
 
-## ⚙️ Configuration
-
-PixMoji-Diffusion uses a centralized configuration system in `src/config.py`:
-
-### Model Config (Default)
-```python
-ModelConfig(
-    model_size="S",      # S, B, L, XL
-    patch_size=2,        # Patch size for tokenization
-    image_size=32,       # Input resolution
-    in_channels=3,       # RGB
-    clip_embed_dim=512,  # CLIP embedding dimension
-)
-```
-
-### Diffusion Config (Default)
-```python
-DiffusionConfig(
-    num_timesteps=1000,  # Total diffusion steps
-    beta_schedule="cosine",  # linear, cosine, quadratic
-    guidance_scale=7.5,  # CFG scale
-    cfg_probability=0.1, # Probability of unconditional dropout
-)
-```
-
-### Training Config (Default)
-```python
-TrainingConfig(
-    epochs=100,
-    batch_size=64,
-    learning_rate=1e-4,
-    use_mixed_precision=True,
-    ema_decay=0.9999,
-    checkpoint_interval=10,
-)
-```
-
-All configurations can be overridden via command-line arguments.
-
-## 🚀 Installation & Usage
-
-### 1. Clone Repository
+### Installation
 
 ```bash
-git clone https://github.com/your-username/PixMoji-Diffusion.git
-cd PixMoji-Diffusion
-```
-
-### 2. Install Dependencies with uv
-
-[uv](https://github.com/astral-sh/uv) is a fast Python package manager (10-100x faster than pip).
-
-```bash
-# Install uv if you haven't already
+# Install uv (fast Python package manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install dependencies
 uv sync
-
-# Activate virtual environment
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
 
-Or using `uv run` (no activation needed):
+### Two-Stage Training (Recommended)
 
+**Stage 1: Pretrain** (CIFAR-100)
 ```bash
-uv run python src/training/train.py --epochs 100 --batch_size 64
+# CIFAR-100 (60K images)
+./pretraining.sh
 ```
 
-### 3. Training
-
-Train your own model from scratch:
-
+**Stage 2: Fine-tune on Emoji**
 ```bash
-uv run python src/training/train.py \
-    --epochs 100 \
-    --batch-size 64 \
-    --learning-rate 1e-4 \
-    --model-size S
+# First, edit main.py: TRAINING_STAGE = "finetune"
+./finetuning.sh
 ```
 
-Or using the convenience script:
+### Direct Training
 
 ```bash
-./scripts/train.sh --epochs 100 --batch-size 64 --model-size S
+# Edit main.py to configure your settings
+python main.py --train       # Training
+python main.py --generate    # Generation
+python main.py --demo        # Interactive demo
 ```
 
-**Training Arguments**:
-- `--epochs`: Number of training epochs (default: 100)
-- `--batch-size`: Batch size (default: 64)
-- `--learning-rate`: Learning rate (default: 1e-4)
-- `--model-size`: DiT model size: S, B, L (default: S)
-- `--dataset-name`: Hugging Face dataset name (default: junyeong-nero/emoji-32)
-- `--output-dir`: Checkpoint output directory (default: checkpoints)
-- `--wandb`: Enable Weights & Biases logging
+## 📖 Training Guide
 
-### 4. Inference (Generation)
+### Two-Stage Training Pipeline
 
-Generate emojis using a trained model:
+For best results with limited emoji data, use the two-stage approach:
+
+**Stage 1: Pretraining** (CIFAR-100)
+
+```python
+# In main.py
+TRAINING_STAGE = "pretrain"
+
+PRETRAIN_CONFIG = {
+    "data_source": "cifar100",
+    "epochs": 50,
+    "batch_size": 64,
+    "learning_rate": 1e-4,
+    "initial_cfg_prob": 0.0,     # Start unconditional
+    "final_cfg_prob": 0.1,       # Gradually add conditioning
+    "cfg_warmup_epochs": 10,
+}
+```
+
+| Dataset | Images | Best For |
+| :--- | :---: | :--- |
+| **CIFAR-100** ⭐ | 60,000 | Quick experiments, limited storage |
+
+**Stage 2: Fine-tuning**
+```python
+# In main.py
+TRAINING_STAGE = "finetune"
+
+FINETUNE_CONFIG = {
+    "data_source": "huggingface",
+    "dataset_name": "junyeong-nero/emoji-32",
+    "epochs": 100,
+    "batch_size": 16,
+    "learning_rate": 1e-5,
+    "cfg_prob": 0.1,
+    "pretrain_checkpoint": "checkpoints/pretrain_cifar100.pt",
+}
+```
+
+### Training Arguments
+
+| Argument | Description | Default |
+| :--- | :--- | :--- |
+| `--epochs` | Number of training epochs | 100 |
+| `--batch-size` | Batch size | 64 |
+| `--learning-rate` | Learning rate | 1e-4 |
+| `--model-size` | DiT model size: XS, S, B, L, XL | S |
+| `--data-source` | Dataset: huggingface, cifar100 | huggingface |
+
+### Generating Images
 
 ```bash
-uv run python src/inference/generate.py \
-    --prompt "a cute robot" \
-    --num-samples 4 \
-    --checkpoint checkpoints/model_final.pt \
-    --guidance-scale 7.5 \
-    --steps 50
+# Single prompt
+python main.py --generate --prompt "a cute robot"
+
+# Multiple prompts (comma-separated)
+python main.py --generate --prompt "rocket,cat,ghost"
+
+# With custom checkpoint
+python main.py --generate --prompt "star" --checkpoint checkpoints/model_best.pt
+
+# Multiple samples
+python main.py --generate --prompt "heart" --num-samples 4
+
+# Custom sampling steps
+python main.py --generate --prompt "fire" --steps 100
 ```
 
 **Generation Arguments**:
-- `--prompt`: Text description of the image (English recommended)
-- `--num-samples`: Number of images to generate (default: 4)
-- `--checkpoint`: Path to model checkpoint
-- `--guidance-scale`: CFG scale (default: 7.5)
-- `--steps`: Sampling steps, DDIM (default: 50), DDPM (default: 1000)
-- `--ddim`: Use DDIM sampling (default: True)
-- `--seed`: Random seed for reproducibility (default: 42)
 
-## 🖼️ Results (Demo)
+| Argument | Description | Default |
+| :--- | :--- | :--- |
+| `--prompt` | Text description | required |
+| `--checkpoint` | Model checkpoint path | checkpoints/model_best.pt |
+| `--num-samples` | Number of images to generate | 1 |
+| `--steps` | Diffusion sampling steps | 50 |
+| `--guidance` | CFG scale | 7.5 |
+| `--seed` | Random seed | None |
 
-> **Note**: Generated images are native 32×32 pixels. For display, they're upscaled to 256×256 using nearest-neighbor interpolation.
+## 🛠️ Configuration
 
-| Prompt | Generated Result |
+All configuration is done in `main.py`:
+
+```python
+# Training stage: "pretrain" or "finetune"
+TRAINING_STAGE = "pretrain"
+
+# Pretraining on CIFAR-100
+PRETRAIN_CONFIG = {
+    "data_source": "cifar100",
+    "epochs": 100,
+    "batch_size": 64,
+    "learning_rate": 1e-4,
+    "initial_cfg_prob": 0.0,
+    "final_cfg_prob": 0.1,
+    "cfg_warmup_epochs": 20,
+}
+
+# Fine-tuning on Emoji
+FINETUNE_CONFIG = {
+    "data_source": "huggingface",
+    "dataset_name": "junyeong-nero/emoji-32",
+    "epochs": 100,
+    "batch_size": 16,
+    "learning_rate": 1e-5,
+    "cfg_prob": 0.1,
+    "pretrain_checkpoint": "checkpoints/pretrain_cifar100.pt",
+}
+
+# Common settings
+COMMON_CONFIG = {
+    "model_size": "S",
+    "patch_size": 2,
+    "num_timesteps": 1000,
+    "beta_schedule": "cosine",
+    "guidance_scale": 7.5,
+    "use_ema": True,
+    "ema_decay": 0.9999,
+}
+```
+
+## 📁 Project Structure
+
+```
+PixMoji-Diffusion/
+├── main.py                 # Main entry point (train/generate/demo)
+├── src/
+│   ├── config.py          # Configuration classes
+│   ├── data/
+│   │   └── dataset.py     # Dataset loaders (emoji, CIFAR-100)
+│   ├── models/
+│   │   ├── dit.py         # DiT model implementation
+│   │   └── diffusion.py   # Diffusion process
+│   ├── text_encoder/
+│   │   └── clip_encoder.py # CLIP text encoder
+│   ├── training/
+│   │   ├── train.py       # Training script
+│   │   └── ema.py         # Exponential Moving Average
+│   └── inference/
+│       └── generate.py    # Generation script
+├── scripts/
+│   └── convert_pretrain_to_finetune.py  # Checkpoint conversion
+├── checkpoints/           # Saved model checkpoints
+├── samples/               # Generated samples
+└── AGENTS.md             # Developer guide
+```
+
+## 🖼️ Results
+
+Generated images are native 32×32 pixels. For display, they're upscaled using nearest-neighbor interpolation.
+
+| Prompt | Result |
 | :--- | :---: |
-| **"Astronaut in space"** | <img src="assets/sample_astronaut.png" width="100"> |
-| **"Red apple"** | <img src="assets/sample_apple.png" width="100"> |
-| **"Ghost with hat"** | <img src="assets/sample_ghost.png" width="100"> |
+| **"rocket"** | <img src="assets/sample_rocket.png" width="100"> |
+| **"cat"** | <img src="assets/sample_cat.png" width="100"> |
+| **"robot"** | <img src="assets/sample_robot.png" width="100"> |
 
-*(Add your generated images to the `assets/` folder and update paths above)*
+*(Add your generated images to the `assets/` folder)*
 
-## 🛠️ Future Works
+## 🔧 Development
 
-- **Web UI**: Interactive demo page using Streamlit
-- **Background Removal**: Automatic transparent background processing with `rembg`
-- **High-Res Upgrade**: Super-Resolution model for 64×64 or 128×128 outputs
-- **Latent DiT**: VAE-based latent diffusion for faster training
+### Code Quality
 
-## 🤝 References
+```bash
+# Check code style
+uv run ruff check src/
+
+# Format code
+uv run black src/
+
+# Type checking
+uv run mypy src/
+```
+
+### Running Tests
+
+```bash
+uv run pytest tests/
+```
+
+## 📚 References
 
 - **DiT**: "Scalable Diffusion Models with Transformers" - Google Research (2023)
   - Paper: [https://arxiv.org/abs/2212.09748](https://arxiv.org/abs/2212.09748)
@@ -229,10 +306,10 @@ uv run python src/inference/generate.py \
 - **CFG**: Ho et al., "Classifier-Free Diffusion Guidance" (2021)
 - **CLIP**: Radford et al., "Learning Transferable Visual Models From Natural Language Supervision" (2021)
 
+## 📄 License
+
+MIT License - See LICENSE file for details.
+
 ---
 
-### 📬 Contact
-
-- **Name**: [Your Name/Nickname]
-- **Email**: [your.email@example.com]
-- **GitHub**: [https://github.com/your-username](https://github.com/your-username)
+**Note**: Generated images are native 32×32 pixels. For display, they're upscaled to larger sizes using nearest-neighbor interpolation to preserve the pixel art aesthetic.
