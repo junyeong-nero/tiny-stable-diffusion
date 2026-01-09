@@ -25,6 +25,7 @@ import torch.nn as nn
 from PIL import Image
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from yaml import safe_load
 
 try:
     import wandb
@@ -42,56 +43,47 @@ from src.training.ema import EMA
 
 
 # =============================================================================
-# CONFIGURATION
+# CONFIGURATION LOADING
 # =============================================================================
 
-# Training stage: "pretrain" or "finetune"
-TRAINING_STAGE: str = "pretrain"  # Change to "finetune" for Stage 2
+CONFIG_PATH = Path(__file__).parent / "config.yaml"
 
-# Pretraining Settings (Stage 1)
-PRETRAIN_CONFIG: dict[str, Any] = {
-    "data_source": "cifar100",
-    "epochs": 200,  # Quick test run
-    "batch_size": 4,  # Smaller batch for MPS
-    "learning_rate": 1e-4,
-    "image_size": 32,
-    "initial_cfg_prob": 0.0,
-    "final_cfg_prob": 0.1,
-    "cfg_warmup_epochs": 1,
-    "checkpoint_path": "checkpoints/pretrain_cifar100_test.pt",
-}
 
-# Fine-tuning Settings (Stage 2)
-FINETUNE_CONFIG: dict[str, Any] = {
-    "data_source": "huggingface",
-    "dataset_name": "junyeong-nero/emoji-32",
-    "epochs": 100,
-    "batch_size": 16,
-    "learning_rate": 1e-5,
-    "image_size": 32,
-    "cfg_prob": 0.1,
-    "pretrain_checkpoint": "checkpoints/pretrain_cifar100.pt",
-    "reset_cross_attention": True,
-    "checkpoint_path": "checkpoints/finetune_emoji.pt",
-}
+def load_config() -> dict[str, Any]:
+    """Load configuration from config.yaml file.
 
-# Common Settings
-COMMON_CONFIG: dict[str, Any] = {
-    "model_size": "S",
-    "patch_size": 2,
-    "num_timesteps": 1000,
-    "beta_schedule": "cosine",
-    "guidance_scale": 7.5,
-    "use_ema": True,
-    "ema_decay": 0.9999,
-    "mixed_precision": False,
-    "device": "auto",  # Force CUDA for training
-    "seed": 42,
-    "validation_prompts": ["rocket", "cat", "robot", "star", "heart"],
-    "validation_interval": 5,
-    "sample_dir": "samples",
-    "checkpoint_dir": "checkpoints",
-}
+    Returns:
+        Configuration dictionary with training_stage, pretrain, finetune, and common keys.
+    """
+    if not CONFIG_PATH.exists():
+        raise FileNotFoundError(f"Configuration file not found: {CONFIG_PATH}")
+
+    with open(CONFIG_PATH, "r") as f:
+        config = safe_load(f)
+
+    return config
+
+
+def get_config(stage: str) -> dict[str, Any]:
+    """Get merged configuration for a specific training stage.
+
+    Args:
+        stage: Either "pretrain" or "finetune"
+
+    Returns:
+        Merged configuration dictionary with common + stage-specific settings.
+    """
+    config = load_config()
+
+    common = config.get("common", {})
+    stage_config = config.get(stage, {})
+
+    return {**common, **stage_config}
+
+
+# Load config once at module level for backward compatibility
+CONFIG_DATA = load_config()
+TRAINING_STAGE: str = CONFIG_DATA.get("training_stage", "pretrain")
 
 
 # =============================================================================
@@ -381,9 +373,7 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
         if step < warmup_steps:
             return float(step) / float(max(1, warmup_steps))
         else:
-            progress = float(step - warmup_steps) / float(
-                max(1, total_steps - warmup_steps)
-            )
+            progress = float(step - warmup_steps) / float(max(1, total_steps - warmup_steps))
             return 0.5 * (1.0 + math.cos(math.pi * progress))
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
@@ -472,14 +462,7 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
             for i, prompt in enumerate(config["validation_prompts"]):
                 img = samples[i]
                 img = (img + 1) / 2
-                img = (
-                    img.permute(1, 2, 0)
-                    .mul(255)
-                    .clamp(0, 255)
-                    .to(torch.uint8)
-                    .cpu()
-                    .numpy()
-                )
+                img = img.permute(1, 2, 0).mul(255).clamp(0, 255).to(torch.uint8).cpu().numpy()
                 img = Image.fromarray(img)
                 safe_prompt = prompt.replace(" ", "_")[:20]
                 img.save(sample_dir / f"{i:02d}_{safe_prompt}.png")
@@ -590,14 +573,7 @@ def generate(
 
         for j, img in enumerate(images):
             img = (img + 1) / 2  # Denormalize
-            img = (
-                img.permute(1, 2, 0)
-                .mul(255)
-                .clamp(0, 255)
-                .to(torch.uint8)
-                .cpu()
-                .numpy()
-            )
+            img = img.permute(1, 2, 0).mul(255).clamp(0, 255).to(torch.uint8).cpu().numpy()
             pil_img = Image.fromarray(img)
             all_images.append(pil_img)
 
@@ -673,14 +649,7 @@ def demo() -> None:
 
             img = images[0]
             img = (img + 1) / 2
-            img = (
-                img.permute(1, 2, 0)
-                .mul(255)
-                .clamp(0, 255)
-                .to(torch.uint8)
-                .cpu()
-                .numpy()
-            )
+            img = img.permute(1, 2, 0).mul(255).clamp(0, 255).to(torch.uint8).cpu().numpy()
             pil_img = Image.fromarray(img)
 
             # Save and display
@@ -821,7 +790,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.pretrain:
-        config = {**COMMON_CONFIG, **PRETRAIN_CONFIG}
+        config = get_config("pretrain")
         # Override with CLI args if provided
         if args.dataset is not None:
             if Path(args.dataset).exists():
@@ -846,7 +815,7 @@ def main() -> None:
         train(config, use_wandb=args.wandb)
 
     elif args.finetune:
-        config = {**COMMON_CONFIG, **FINETUNE_CONFIG}
+        config = get_config("finetune")
         # Override with CLI args if provided
         if args.dataset is not None:
             if Path(args.dataset).exists():
@@ -871,11 +840,8 @@ def main() -> None:
         train(config, use_wandb=args.wandb)
 
     elif args.train:
-        # Select config based on TRAINING_STAGE constant
-        if TRAINING_STAGE == "pretrain":
-            config = {**COMMON_CONFIG, **PRETRAIN_CONFIG}
-        else:
-            config = {**COMMON_CONFIG, **FINETUNE_CONFIG}
+        # Select config based on TRAINING_STAGE from config.yaml
+        config = get_config(TRAINING_STAGE)
         # Wandb settings
         config["wandb_project"] = args.wandb_project
         config["wandb_run_name"] = args.wandb_run_name
