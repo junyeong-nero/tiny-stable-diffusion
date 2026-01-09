@@ -1,1 +1,1 @@
-uv run main.py --finetune
+uv run main.py --pretrain

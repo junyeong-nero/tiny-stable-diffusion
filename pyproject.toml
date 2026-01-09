@@ -48,6 +48,7 @@ dependencies = [
     "torchvision>=0.24.1",
     "wandb>=0.18.0",
     "pyyaml>=6.0.0",
+    "mmdit>=0.2.0",
 ]
 
 [project.optional-dependencies]

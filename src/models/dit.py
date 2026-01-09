@@ -2,6 +2,9 @@
 
 Implements the DiT model from "Scalable Diffusion Models with Transformers"
 (Google Research, 2023): https://arxiv.org/abs/2212.09748
+
+Also supports MMDiT (Multi-Modal DiT) from Stable Diffusion 3:
+https://github.com/lucidrains/mmdit
 """
 
 from __future__ import annotations
@@ -11,6 +14,14 @@ from typing import Literal
 
 import torch
 import torch.nn as nn
+
+
+try:
+    from mmdit import MMDiT as MMDitModel
+
+    MMDI_AVAILABLE = True
+except ImportError:
+    MMDI_AVAILABLE = False
 
 
 class PatchEmbed(nn.Module):
@@ -283,24 +294,33 @@ class FinalLayer(nn.Module):
 
         # Reshape to image
         B, N, _ = x.shape
-        x = x.view(B, self.patch_size, self.patch_size, self.out_channels, N)
-        x = x.permute(0, 3, 4, 1, 2)  # (B, C, N, p, p)
-        x = x.flatten(2, 3)  # (B, C, N*p, p)
-        H = W = int(N**0.5) * self.patch_size
-        x = x.view(B, self.out_channels, H, W)
+        h = w = int(N**0.5)
+
+        # (B, N, p*p*C) -> (B, h, w, p, p, C)
+        x = x.view(B, h, w, self.patch_size, self.patch_size, self.out_channels)
+
+        # (B, h, w, p, p, C) -> (B, C, h, p, w, p)
+        x = x.permute(0, 5, 1, 3, 2, 4)
+
+        # (B, C, h*p, w*p)
+        x = x.contiguous().view(B, self.out_channels, h * self.patch_size, w * self.patch_size)
 
         return x
 
 
 class DiT(nn.Module):
-    """Diffusion Transformer (DiT) Model.
+    """Diffusion Transformer (DiT) or MMDiT Model.
 
     Architecture:
         Input Image -> Patch Embed -> Position Embed -> DiT Blocks -> Final Layer -> Output Image
 
     Conditioning:
         - Timestep: Via AdaLN-Zero in each block
-        - Text: Via Cross-Attention in each block
+        - Text: Via Cross-Attention in each block (DiT) or Joint Attention (MMDiT)
+
+    Supports two model types:
+        - "dit": Standard DiT with cross-attention for text conditioning
+        - "mmdit": Multi-Modal DiT from Stable Diffusion 3 with joint text-image attention
     """
 
     def __init__(
@@ -313,6 +333,9 @@ class DiT(nn.Module):
         attn_dropout: float = 0.0,
         mlp_dropout: float = 0.0,
         mlp_ratio: float = 4.0,
+        model_type: Literal["dit", "mmdit"] = "dit",
+        qk_rmsnorm: bool = True,
+        register_tokens: int = 0,
     ) -> None:
         super().__init__()
 
@@ -329,12 +352,47 @@ class DiT(nn.Module):
         self.in_channels = in_channels
         self.image_size = image_size
         self.patch_size = patch_size
-        self.model_size = model_size  # Store model size string ("S", "B", "L", "XL")
+        self.model_size = model_size
+        self.model_type = model_type
         self.hidden_size = config["hidden"]
         self.num_layers = config["layers"]
         self.num_heads = config["heads"]
         self.clip_embed_dim = clip_embed_dim
 
+        if model_type == "mmdit":
+            if not MMDI_AVAILABLE:
+                raise ImportError("mmdit is not installed. Install with: pip install mmdit")
+            self._init_mmdit(
+                in_channels,
+                image_size,
+                patch_size,
+                clip_embed_dim,
+                mlp_ratio,
+                qk_rmsnorm,
+                register_tokens,
+            )
+        else:
+            self._init_standard_dit(
+                in_channels,
+                image_size,
+                patch_size,
+                clip_embed_dim,
+                mlp_ratio,
+                attn_dropout,
+                mlp_dropout,
+            )
+
+    def _init_standard_dit(
+        self,
+        in_channels: int,
+        image_size: int,
+        patch_size: int,
+        clip_embed_dim: int,
+        mlp_ratio: float,
+        attn_dropout: float,
+        mlp_dropout: float,
+    ) -> None:
+        """Initialize standard DiT with cross-attention."""
         # Patch embedding
         self.patch_embed = PatchEmbed(in_channels, self.hidden_size, patch_size, image_size)
         self.num_patches = self.patch_embed.num_patches
@@ -375,6 +433,50 @@ class DiT(nn.Module):
         # Initialize weights
         self._init_weights()
 
+    def _init_mmdit(
+        self,
+        in_channels: int,
+        image_size: int,
+        patch_size: int,
+        clip_embed_dim: int,
+        mlp_ratio: float,
+        qk_rmsnorm: bool,
+        register_tokens: int,
+    ) -> None:
+        """Initialize MMDiT from lucidrains/mmdit library."""
+        # For MMDiT, we use dim_image as hidden_size and dim_cond for timestep conditioning
+        self.mmdit = MMDitModel(
+            depth=self.num_layers,
+            dim_image=self.hidden_size,
+            dim_text=clip_embed_dim,
+            dim_cond=self.hidden_size,  # Enable timestep conditioning
+            num_register_tokens=register_tokens,
+            qk_rmsnorm=qk_rmsnorm,
+        )
+
+        # Patch embedding for images (output dimension = hidden_size)
+        self.patch_embed = PatchEmbed(in_channels, self.hidden_size, patch_size, image_size)
+        self.num_patches = self.patch_embed.num_patches
+
+        # Position embedding for image tokens
+        self.pos_embed = PositionEmbed(self.num_patches, self.hidden_size)
+
+        # Register tokens count (stored for forward pass)
+        self.register_tokens = register_tokens
+
+        # Timestep embedding
+        self.timestep_embed = nn.Sequential(
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.SiLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+        )
+
+        # Final layer to decode patch embeddings to image
+        self.final_layer = FinalLayer(self.hidden_size, patch_size, in_channels)
+
+        # Initialize weights
+        self._init_weights_mmdit()
+
     def _init_weights(self) -> None:
         """Initialize weights following DiT paper.
 
@@ -401,7 +503,6 @@ class DiT(nn.Module):
         nn.init.constant_(self.text_proj.bias, 0)
 
         # Zero-initialize AdaLN-Zero output layer (critical for DiT)
-        # This ensures blocks initially behave as identity functions
         nn.init.constant_(self.ada_ln_zero.ada_lin[-1].weight, 0)
         nn.init.constant_(self.ada_ln_zero.ada_lin[-1].bias, 0)
 
@@ -425,6 +526,27 @@ class DiT(nn.Module):
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
 
+    def _init_weights_mmdit(self) -> None:
+        """Initialize weights for MMDiT model."""
+        # Initialize patch embed projection
+        nn.init.xavier_uniform_(self.patch_embed.proj.weight)
+        nn.init.constant_(self.patch_embed.proj.bias, 0)
+
+        # Initialize pos embed
+        nn.init.normal_(self.pos_embed.pos_embed, std=0.02)
+
+        # Initialize timestep embed
+        for layer in self.timestep_embed:
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_uniform_(layer.weight)
+                nn.init.constant_(layer.bias, 0)
+
+        # Initialize final layer
+        nn.init.xavier_uniform_(self.final_layer.linear.weight)
+        nn.init.constant_(self.final_layer.linear.bias, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
+
     def forward(
         self,
         x: torch.Tensor,
@@ -441,6 +563,18 @@ class DiT(nn.Module):
         Returns:
             Predicted noise (B, C, H, W)
         """
+        if self.model_type == "mmdit":
+            return self._forward_mmdit(x, timestep, text_embeds)
+        else:
+            return self._forward_standard_dit(x, timestep, text_embeds)
+
+    def _forward_standard_dit(
+        self,
+        x: torch.Tensor,
+        timestep: torch.Tensor,
+        text_embeds: torch.Tensor,
+    ) -> torch.Tensor:
+        """Forward pass for standard DiT with cross-attention."""
         # Add sequence dimension for cross-attention: (B, D) -> (B, 1, D)
         if text_embeds.dim() == 2:
             text_embeds = text_embeds.unsqueeze(1)
@@ -480,6 +614,47 @@ class DiT(nn.Module):
 
         # Final layer (with timestep conditioning)
         x = self.final_layer(x, timestep)  # (B, C, H, W)
+
+        return x
+
+    def _forward_mmdit(
+        self,
+        x: torch.Tensor,
+        timestep: torch.Tensor,
+        text_embeds: torch.Tensor,
+    ) -> torch.Tensor:
+        """Forward pass for MMDiT with joint text-image attention.
+
+        MMDiT uses joint attention where text and image tokens attend to each other.
+        """
+        # Get timestep embedding
+        if isinstance(timestep, torch.Tensor) and timestep.dim() == 1:
+            timestep = self._get_timestep_embedding(timestep)
+        elif not isinstance(timestep, torch.Tensor):
+            timestep = self._get_timestep_embedding(torch.tensor([timestep], device=x.device))
+
+        time_cond = self.timestep_embed(timestep)  # (B, D)
+
+        # Patch embedding for image
+        image_tokens = self.patch_embed(x)  # (B, N, D_hidden)
+        image_tokens = self.pos_embed(image_tokens)  # (B, N, D_hidden)
+
+        # Prepare text tokens (B, D) -> (B, 1, D)
+        if text_embeds.dim() == 2:
+            text_tokens = text_embeds.unsqueeze(1)  # (B, 1, D_text)
+        else:
+            text_tokens = text_embeds
+
+        # MMDiT forward pass with joint text-image attention
+        text_out, image_out = self.mmdit(
+            text_tokens=text_tokens,
+            image_tokens=image_tokens,
+            text_mask=None,
+            time_cond=time_cond,
+        )
+
+        # Final layer to decode image tokens
+        x = self.final_layer(image_out, time_cond)  # (B, C, H, W)
 
         return x
 
