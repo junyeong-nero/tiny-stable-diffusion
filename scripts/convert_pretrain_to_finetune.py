@@ -12,7 +12,12 @@ The script can:
 - Save the converted checkpoint
 
 Usage:
-    # Convert pretrained checkpoint for fine-tuning (reset cross-attention)
+    # Convert pretrained checkpoint for fine-tuning (keep cross-attention weights)
+    python scripts/convert_pretrain_to_finetune.py \
+        --input checkpoints/pretrain_cifar100.pt \
+        --output checkpoints/finetune.pt
+
+    # Convert and reset cross-attention weights
     python scripts/convert_pretrain_to_finetune.py \
         --input checkpoints/pretrain_cifar100.pt \
         --output checkpoints/finetune.pt \
@@ -38,7 +43,7 @@ import torch
 def convert_checkpoint(
     input_path: str,
     output_path: str,
-    reset_cross_attn: bool = True,
+    reset_cross_attn: bool = False,
     reset_final_layer: bool = False,
     reset_ada_ln: bool = False,
 ) -> None:
@@ -142,8 +147,8 @@ def main() -> None:
     parser.add_argument(
         "--reset-cross-attn",
         action="store_true",
-        default=True,
-        help="Reset cross-attention weights (default: True)",
+        default=False,
+        help="Reset cross-attention weights",
     )
     parser.add_argument(
         "--no-reset-cross-attn",

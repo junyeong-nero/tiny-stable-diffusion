@@ -31,11 +31,17 @@ class Diffusion:
         guidance_scale: float = 7.5,
         cfg_probability: float = 0.1,
         epsilon: float = 1e-8,
+        uncond_embed: torch.Tensor | None = None,
+        uncond_mask: torch.Tensor | None = None,
     ) -> None:
         self.num_timesteps = num_timesteps
         self.guidance_scale = guidance_scale
         self.cfg_probability = cfg_probability
         self.epsilon = epsilon
+
+        # Unconditional embedding for classifier-free guidance (empty string "" embedding)
+        self.uncond_embed = uncond_embed
+        self.uncond_mask = uncond_mask
 
         # Define beta schedule
         if beta_schedule == "cosine":
@@ -52,26 +58,20 @@ class Diffusion:
         # Precompute diffusion parameters
         alphas = 1.0 - betas
         self.alphas_cumprod = torch.cumprod(alphas, dim=0)
-        self.alphas_cumprod_prev = torch.cat(
-            [torch.tensor([1.0]), self.alphas_cumprod[:-1]]
-        )
+        self.alphas_cumprod_prev = torch.cat([torch.tensor([1.0]), self.alphas_cumprod[:-1]])
 
         # For DDIM sampling
         self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
         self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
         self.sqrt_recip_alphas_cumprod = torch.sqrt(1.0 / self.alphas_cumprod)
-        self.sqrt_recip_alphas_cumprod_minus_1 = torch.sqrt(
-            1.0 / self.alphas_cumprod - 1
-        )
+        self.sqrt_recip_alphas_cumprod_minus_1 = torch.sqrt(1.0 / self.alphas_cumprod - 1)
 
         # Posterior mean and variance for DDPM
         self.posterior_mean_coef1 = (
             betas * torch.sqrt(self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
         )
         self.posterior_mean_coef2 = (
-            (1.0 - self.alphas_cumprod_prev)
-            * torch.sqrt(alphas)
-            / (1.0 - self.alphas_cumprod)
+            (1.0 - self.alphas_cumprod_prev) * torch.sqrt(alphas) / (1.0 - self.alphas_cumprod)
         )
         self.posterior_variance = (
             betas * (1.0 - self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
@@ -88,9 +88,7 @@ class Diffusion:
         """
         steps = self.num_timesteps + 1
         x = torch.linspace(0, self.num_timesteps, steps)
-        alphas_cumprod = (
-            torch.cos(((x / self.num_timesteps) + s) / (1 + s) * math.pi * 0.5) ** 2
-        )
+        alphas_cumprod = torch.cos(((x / self.num_timesteps) + s) / (1 + s) * math.pi * 0.5) ** 2
         alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
         betas = 1.0 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
         betas = torch.clip(betas, 0.0, 0.999)
@@ -115,9 +113,7 @@ class Diffusion:
         if noise is None:
             noise = torch.randn_like(x_0)
 
-        sqrt_alphas_cumprod_t = self._extract(
-            self.sqrt_alphas_cumprod, timesteps, x_0.shape
-        )
+        sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, timesteps, x_0.shape)
         sqrt_one_minus_alphas_cumprod_t = self._extract(
             self.sqrt_one_minus_alphas_cumprod, timesteps, x_0.shape
         )
@@ -152,12 +148,12 @@ class Diffusion:
         predicted_noise = model(x_t, timesteps, text_embeds, text_mask)
 
         # Apply classifier-free guidance during sampling
-        if use_cfg and self.guidance_scale != 1.0:
-            # Get unconditional prediction
+        if use_cfg and self.guidance_scale != 1.0 and self.uncond_embed is not None:
+            # Get unconditional prediction using pre-computed uncond_embed
+            uncond_embed = self.uncond_embed.to(x_t.device)
+            uncond_mask = self.uncond_mask.to(x_t.device) if self.uncond_mask is not None else None
             with torch.no_grad():
-                unconditional_noise = model(
-                    x_t, timesteps, torch.zeros_like(text_embeds), text_mask
-                )
+                unconditional_noise = model(x_t, timesteps, uncond_embed, uncond_mask)
             # CFG: noise = uncond + scale * (cond - uncond)
             predicted_noise = unconditional_noise + self.guidance_scale * (
                 predicted_noise - unconditional_noise
@@ -167,9 +163,7 @@ class Diffusion:
         # x_0 = (x_t - sqrt(1 - alpha_cumprod) * noise) / sqrt(alpha_cumprod)
         pred_x_0 = (
             self._extract(self.sqrt_recip_alphas_cumprod, timesteps, x_t.shape) * x_t
-            - self._extract(
-                self.sqrt_recip_alphas_cumprod_minus_1, timesteps, x_t.shape
-            )
+            - self._extract(self.sqrt_recip_alphas_cumprod_minus_1, timesteps, x_t.shape)
             * predicted_noise
         )
         # Clamp to valid range for stability
@@ -214,20 +208,19 @@ class Diffusion:
         # 1. Predict noise (epsilon_theta)
         predicted_noise = model(x_t, timesteps, text_embeds, text_mask)
 
-        if use_cfg and self.guidance_scale != 1.0:
+        if use_cfg and self.guidance_scale != 1.0 and self.uncond_embed is not None:
+            # Get unconditional prediction using pre-computed uncond_embed
+            uncond_embed = self.uncond_embed.to(x_t.device)
+            uncond_mask = self.uncond_mask.to(x_t.device) if self.uncond_mask is not None else None
             with torch.no_grad():
-                unconditional_noise = model(
-                    x_t, timesteps, torch.zeros_like(text_embeds), text_mask
-                )
+                unconditional_noise = model(x_t, timesteps, uncond_embed, uncond_mask)
             predicted_noise = unconditional_noise + self.guidance_scale * (
                 predicted_noise - unconditional_noise
             )
 
         # 2. Get alpha constants
         alpha_t = self.alphas_cumprod[t_index]
-        alpha_t_prev = (
-            self.alphas_cumprod[t_index - 1] if t_index > 0 else torch.tensor(1.0)
-        )
+        alpha_t_prev = self.alphas_cumprod[t_index - 1] if t_index > 0 else torch.tensor(1.0)
 
         # Move to device
         alpha_t = alpha_t.to(x_t.device)
@@ -236,9 +229,7 @@ class Diffusion:
         # 3. Predict x_0 (Clamped)
         # x_0 = (x_t - sqrt(1-alpha_t) * eps) / sqrt(alpha_t)
         sqrt_one_minus_alpha_t = torch.sqrt(1.0 - alpha_t)
-        pred_x_0 = (x_t - sqrt_one_minus_alpha_t * predicted_noise) / torch.sqrt(
-            alpha_t
-        )
+        pred_x_0 = (x_t - sqrt_one_minus_alpha_t * predicted_noise) / torch.sqrt(alpha_t)
         pred_x_0 = torch.clamp(pred_x_0, -1.0, 1.0)
 
         # 4. Compute variance (sigma) for eta
@@ -329,9 +320,7 @@ class Diffusion:
                     use_cfg=use_cfg,
                 )
             else:
-                x_t = self.p_sample(
-                    model, x_t, t_batch, text_embeds, text_mask, use_cfg=use_cfg
-                )
+                x_t = self.p_sample(model, x_t, t_batch, text_embeds, text_mask, use_cfg=use_cfg)
 
         # Normalize to [0, 1]
         x_t = (x_t + 1.0) / 2.0
@@ -369,30 +358,32 @@ class Diffusion:
         text_embeds: torch.Tensor,
         text_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Calculate training loss with CFG Dropout."""
+        """Calculate training loss with CFG Dropout.
+
+        Uses unconditional embedding (empty string "" CLIP embedding) for samples
+        where text conditioning is dropped, following Stable Diffusion approach.
+        """
         noise = torch.randn_like(x_0)
         x_t = self.q_sample(x_0, timesteps, noise)
 
-        # Apply CFG dropout
-        if self.cfg_probability > 0:
+        # Apply CFG dropout using unconditional embedding
+        if self.cfg_probability > 0 and self.uncond_embed is not None:
             batch_size = x_0.shape[0]
             drop_mask = torch.rand(batch_size, device=x_0.device) < self.cfg_probability
 
-            # (수정) 임베딩을 0으로 만듭니다. (이상적으로는 'Empty String' 임베딩이 좋습니다)
-            drop_mask_expanded = drop_mask.view(batch_size, 1, 1)
-            text_embeds = text_embeds.clone()  # 원본 보존을 위해 clone
-            text_embeds = text_embeds * (~drop_mask_expanded).float()
+            if drop_mask.any():
+                text_embeds = text_embeds.clone()
+                uncond_embed = self.uncond_embed.to(x_0.device)
+                uncond_mask = (
+                    self.uncond_mask.to(x_0.device) if self.uncond_mask is not None else None
+                )
 
-            # (중요 수정) Mask를 0으로 만들면 Attention에서 NaN이 뜰 수 있습니다.
-            # 1. 보통 Unconditional Embedding도 길이는 있으므로 마스크를 건드리지 않거나
-            # 2. 혹은 마스크를 처리한다면 최소 1개 토큰은 True로 남겨야 합니다.
-            # 여기서는 '임베딩이 0'이 되었으므로, 모델이 이를 'Null'로 인식하도록 학습시킵니다.
-            # 따라서 text_mask는 건드리지 않는 것이 오히려 안전합니다. (Zero Vector를 '보게' 만듦)
-
-            # 만약 꼭 마스크 처리를 해야 한다면, 아래 코드는 삭제하거나 주의해야 합니다.
-            # if text_mask is not None:
-            #     drop_mask_for_mask = drop_mask.view(batch_size, 1)
-            #     text_mask = text_mask * (~drop_mask_for_mask).float()
+                # Replace dropped samples with unconditional embedding
+                for i in range(batch_size):
+                    if drop_mask[i]:
+                        text_embeds[i] = uncond_embed[0]
+                        if text_mask is not None and uncond_mask is not None:
+                            text_mask[i] = uncond_mask[0]
 
         predicted_noise = model(x_t, timesteps, text_embeds, text_mask)
         loss = nn.functional.mse_loss(predicted_noise, noise)
