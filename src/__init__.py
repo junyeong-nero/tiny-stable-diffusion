@@ -1,1 +1,1 @@
-"""PixMoji-Diffusion: Text-to-Pixel Art Generator using Diffusion Transformer (DiT)."""
+"""text-to-emoji: Text-to-Pixel Art Generator using Diffusion Transformer (DiT)."""

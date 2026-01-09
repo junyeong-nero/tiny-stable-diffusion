@@ -1,4 +1,4 @@
-# TODO.md - PixMoji-Diffusion Development Roadmap
+# TODO.md - text-to-emoji Development Roadmap
 
 > **Status**: Training Pipeline Complete - Demo & Polish Phase
 > **Last Updated**: 2025-01-09
@@ -18,7 +18,7 @@
 
 ## 🎯 Project Overview
 
-This TODO outlines the complete development roadmap for building **PixMoji-Diffusion**, a Text-to-Pixel Art Generator using Diffusion Models (DDPM/DDIM) with CLIP text conditioning and **DiT (Diffusion Transformer)** architecture.
+This TODO outlines the complete development roadmap for building **text-to-emoji**, a Text-to-Pixel Art Generator using Diffusion Models (DDPM/DDIM) with CLIP text conditioning and **DiT (Diffusion Transformer)** architecture.
 
 **Target Output**: 32×32 pixel art emojis from natural language prompts
 
@@ -629,7 +629,7 @@ uv run mypy src/
 **Datasets**:
 - **junyeong-nero/emoji-32**: [https://huggingface.co/datasets/junyeong-nero/emoji-32](https://huggingface.co/datasets/junyeong-nero/emoji-32)
   - 32×32 RGB emoji images with text captions (no resize needed)
-  - Used for training PixMoji-Diffusion
+  - Used for training text-to-emoji
 
 **Resources**:
 - **DiT Reference Implementation**: [https://github.com/facebookresearch/DiT](https://github.com/facebookresearch/DiT)

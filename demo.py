@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive demo for PixMoji-Diffusion.
+"""Interactive demo for text-to-emoji.
 
 Generate pixel art emojis from text prompts interactively.
 
@@ -258,7 +258,7 @@ def interactive_mode(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     print("\n" + "=" * 50)
-    print("PixMoji-Diffusion Interactive Demo")
+    print("text-to-emoji Interactive Demo")
     print("=" * 50)
     print(f"Device: {device}")
     print(f"Steps: {num_steps}, Guidance: {guidance_scale}")
@@ -388,7 +388,7 @@ def interactive_mode(
 def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="PixMoji-Diffusion Interactive Demo",
+        description="text-to-emoji Interactive Demo",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -478,9 +478,7 @@ Examples:
         device = torch.device(args.device)
 
     # Load model
-    model, diffusion, clip_encoder, model_config = load_model(
-        str(checkpoint_path), device
-    )
+    model, diffusion, clip_encoder, model_config = load_model(str(checkpoint_path), device)
 
     output_dir = Path(args.output_dir)
 

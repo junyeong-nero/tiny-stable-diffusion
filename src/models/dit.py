@@ -74,6 +74,10 @@ class AdaLNZero(nn.Module):
 
     From DiT paper: "We extend AdaIN by zero-initializing the
     modulation parameters in each block... AdaLN-Zero is more effective."
+
+    Each block receives 6 parameters:
+    - shift_msa, scale_msa, gate_msa (for self-attention)
+    - shift_mlp, scale_mlp, gate_mlp (for MLP)
     """
 
     def __init__(self, hidden_size: int, num_layers: int) -> None:
@@ -82,49 +86,72 @@ class AdaLNZero(nn.Module):
         self.num_layers = num_layers
 
         # Project timestep to per-block scale and shift parameters
-        # Each layer gets its own adaptive parameters
+        # Each layer gets 6 adaptive parameters (following official DiT)
         self.ada_lin = nn.Sequential(
             nn.SiLU(),
-            nn.Linear(hidden_size, num_layers * hidden_size * 3),  # scale, shift, gate
+            nn.Linear(hidden_size, num_layers * hidden_size * 6),
         )
 
     def forward(
         self, temb: torch.Tensor
-    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]]:
+    ) -> tuple[
+        list[torch.Tensor],
+        list[torch.Tensor],
+        list[torch.Tensor],
+        list[torch.Tensor],
+        list[torch.Tensor],
+        list[torch.Tensor],
+    ]:
         """Project timestep embedding to per-block parameters.
 
         Args:
             temb: Time embedding (B, D)
 
         Returns:
-            Lists of scale, shift, and gate parameters for each block
+            Lists of (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp)
+            for each block
         """
-        temb = self.ada_lin(temb)  # (B, num_layers * D * 3)
-        temb = temb.view(temb.size(0), self.num_layers, -1)  # (B, num_layers, D*3)
+        temb = self.ada_lin(temb)  # (B, num_layers * D * 6)
+        temb = temb.view(temb.size(0), self.num_layers, -1)  # (B, num_layers, D*6)
 
-        # Split into scale, shift, gate for each layer
-        scales = []
-        shifts = []
-        gates = []
+        # Split into 6 parameters for each layer (following official DiT order)
+        shifts_msa = []
+        scales_msa = []
+        gates_msa = []
+        shifts_mlp = []
+        scales_mlp = []
+        gates_mlp = []
 
         for i in range(self.num_layers):
-            params = temb[:, i, :]  # (B, D*3)
-            scale, shift, gate = params.chunk(3, dim=-1)
-            scales.append(scale[:, None, :])  # (B, 1, D)
-            shifts.append(shift[:, None, :])
-            gates.append(gate[:, None, :])
+            params = temb[:, i, :]  # (B, D*6)
+            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = params.chunk(
+                6, dim=-1
+            )
+            shifts_msa.append(shift_msa[:, None, :])  # (B, 1, D)
+            scales_msa.append(scale_msa[:, None, :])
+            gates_msa.append(gate_msa[:, None, :])
+            shifts_mlp.append(shift_mlp[:, None, :])
+            scales_mlp.append(scale_mlp[:, None, :])
+            gates_mlp.append(gate_mlp[:, None, :])
 
-        return scales, shifts, gates
+        return shifts_msa, scales_msa, gates_msa, shifts_mlp, scales_mlp, gates_mlp
+
+
+def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    """Apply adaptive modulation (shift and scale) to normalized input."""
+    return x * (1 + scale) + shift
 
 
 class DiTBlock(nn.Module):
     """DiT Transformer Block with Cross-Attention.
 
     Architecture:
-        x -> LayerNorm -> Attention -> Add
-        where Attention can be:
-        - Self-Attention (on image tokens)
-        - Cross-Attention (between image and text tokens)
+        x -> LayerNorm -> Self-Attention -> Add
+        x -> LayerNorm -> Cross-Attention (with text) -> Add
+        x -> LayerNorm -> MLP -> Add
+
+    AdaLN-Zero modulation is applied to self-attention and MLP branches.
+    Cross-attention uses standard LayerNorm (text conditioning is separate).
     """
 
     def __init__(
@@ -140,20 +167,20 @@ class DiTBlock(nn.Module):
         self.num_heads = num_heads
         self.mlp_ratio = mlp_ratio
 
-        # Self-Attention on image tokens
-        self.norm1 = nn.LayerNorm(hidden_size, eps=1e-6)
+        # Self-Attention on image tokens (AdaLN-Zero: no learnable affine params)
+        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.attn = nn.MultiheadAttention(
             hidden_size, num_heads, dropout=attn_dropout, batch_first=True
         )
 
-        # Cross-Attention for text conditioning
+        # Cross-Attention for text conditioning (standard LayerNorm)
         self.norm2 = nn.LayerNorm(hidden_size, eps=1e-6)
         self.cross_attn = nn.MultiheadAttention(
             hidden_size, num_heads, dropout=attn_dropout, batch_first=True
         )
 
-        # MLP
-        self.norm3 = nn.LayerNorm(hidden_size, eps=1e-6)
+        # MLP (AdaLN-Zero: no learnable affine params)
+        self.norm3 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         mlp_hidden = int(hidden_size * mlp_ratio)
         self.mlp = nn.Sequential(
             nn.Linear(hidden_size, mlp_hidden),
@@ -168,33 +195,40 @@ class DiTBlock(nn.Module):
         x: torch.Tensor,
         text_embeds: torch.Tensor | None = None,
         text_mask: torch.Tensor | None = None,
-        scale: torch.Tensor | None = None,
-        shift: torch.Tensor | None = None,
-        gate: torch.Tensor | None = None,
+        shift_msa: torch.Tensor | None = None,
+        scale_msa: torch.Tensor | None = None,
+        gate_msa: torch.Tensor | None = None,
+        shift_mlp: torch.Tensor | None = None,
+        scale_mlp: torch.Tensor | None = None,
+        gate_mlp: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Forward pass with optional AdaLN-Zero conditioning.
+        """Forward pass with AdaLN-Zero conditioning.
 
         Args:
             x: Input tokens (B, N, D)
             text_embeds: Text conditioning (B, L, D), optional
             text_mask: Attention mask for text (B, L), optional (True = attend)
-            scale: AdaLN scale parameter (B, 1, D)
-            shift: AdaLN shift parameter (B, 1, D)
-            gate: AdaLN gate parameter (B, 1, D)
+            shift_msa: AdaLN shift for self-attention (B, 1, D)
+            scale_msa: AdaLN scale for self-attention (B, 1, D)
+            gate_msa: AdaLN gate for self-attention (B, 1, D)
+            shift_mlp: AdaLN shift for MLP (B, 1, D)
+            scale_mlp: AdaLN scale for MLP (B, 1, D)
+            gate_mlp: AdaLN gate for MLP (B, 1, D)
 
         Returns:
             Processed tokens (B, N, D)
         """
-        # Self-Attention with optional AdaLN-Zero
-        if scale is not None and shift is not None:
-            x_norm = self.norm1(x) * (1 + scale) + shift
-        else:
-            x_norm = self.norm1(x)
+        # Self-Attention with AdaLN-Zero modulation
+        x_norm = self.norm1(x)
+        if shift_msa is not None and scale_msa is not None:
+            x_norm = modulate(x_norm, shift_msa, scale_msa)
 
         x_attn, _ = self.attn(x_norm, x_norm, x_norm)
+        if gate_msa is not None:
+            x_attn = gate_msa * x_attn
         x = x + x_attn
 
-        # Cross-Attention with text conditioning
+        # Cross-Attention with text conditioning (no AdaLN modulation)
         if text_embeds is not None:
             x_norm = self.norm2(x)
             # Use attention mask if provided to ignore padding tokens
@@ -229,18 +263,24 @@ class DiTBlock(nn.Module):
                 x_cross, _ = self.cross_attn(x_norm, text_embeds, text_embeds)
             x = x + x_cross
 
-        # MLP with optional AdaLN-Zero
+        # MLP with AdaLN-Zero modulation
         x_norm = self.norm3(x)
+        if shift_mlp is not None and scale_mlp is not None:
+            x_norm = modulate(x_norm, shift_mlp, scale_mlp)
+
         x_mlp = self.mlp(x_norm)
-        if gate is not None:
-            x_mlp = x_mlp * gate
+        if gate_mlp is not None:
+            x_mlp = gate_mlp * x_mlp
         x = x + x_mlp
 
         return x
 
 
 class FinalLayer(nn.Module):
-    """Final layer to decode patch embeddings back to image."""
+    """Final layer to decode patch embeddings back to image.
+
+    Includes AdaLN modulation for timestep conditioning (following official DiT).
+    """
 
     def __init__(
         self,
@@ -249,21 +289,30 @@ class FinalLayer(nn.Module):
         out_channels: int = 3,
     ) -> None:
         super().__init__()
-        self.norm = nn.LayerNorm(hidden_size, eps=1e-6)
+        self.norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.linear = nn.Linear(hidden_size, patch_size * patch_size * out_channels)
         self.patch_size = patch_size
         self.out_channels = out_channels
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # AdaLN modulation for final layer (2 parameters: shift, scale)
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(hidden_size, 2 * hidden_size),
+        )
+
+    def forward(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
         """Decode patch tokens to image.
 
         Args:
             x: Patch embeddings (B, N, D)
+            c: Conditioning embedding (B, D) - timestep embedding
 
         Returns:
             Image tensor (B, C, H, W)
         """
-        x = self.norm(x)
+        # Apply AdaLN modulation
+        shift, scale = self.adaLN_modulation(c).chunk(2, dim=1)
+        x = modulate(self.norm(x), shift.unsqueeze(1), scale.unsqueeze(1))
         x = self.linear(x)  # (B, N, patch_size^2 * C)
 
         # Reshape to image
@@ -314,6 +363,7 @@ class DiT(nn.Module):
         self.in_channels = in_channels
         self.image_size = image_size
         self.patch_size = patch_size
+        self.model_size = model_size  # Store model size string ("S", "B", "L", "XL")
         self.hidden_size = config["hidden"]
         self.num_layers = config["layers"]
         self.num_heads = config["heads"]
@@ -360,7 +410,13 @@ class DiT(nn.Module):
         self._init_weights()
 
     def _init_weights(self) -> None:
-        """Initialize weights following DiT paper."""
+        """Initialize weights following DiT paper.
+
+        Key initialization strategies:
+        - Xavier uniform for most linear layers
+        - Zero initialization for AdaLN output layers (critical for stable training)
+        - Normal distribution (std=0.02) for positional embeddings
+        """
         # Initialize patch embed projection
         nn.init.xavier_uniform_(self.patch_embed.proj.weight)
         nn.init.constant_(self.patch_embed.proj.bias, 0)
@@ -378,6 +434,11 @@ class DiT(nn.Module):
         nn.init.xavier_uniform_(self.text_proj.weight)
         nn.init.constant_(self.text_proj.bias, 0)
 
+        # Zero-initialize AdaLN-Zero output layer (critical for DiT)
+        # This ensures blocks initially behave as identity functions
+        nn.init.constant_(self.ada_ln_zero.ada_lin[-1].weight, 0)
+        nn.init.constant_(self.ada_ln_zero.ada_lin[-1].bias, 0)
+
         # Initialize DiT blocks
         for block in self.blocks:
             if isinstance(block.attn, nn.MultiheadAttention):
@@ -394,8 +455,9 @@ class DiT(nn.Module):
         # Initialize final layer
         nn.init.xavier_uniform_(self.final_layer.linear.weight)
         nn.init.constant_(self.final_layer.linear.bias, 0)
-        nn.init.constant_(self.final_layer.norm.weight, 1.0)
-        nn.init.constant_(self.final_layer.norm.bias, 0.0)
+        # Zero-initialize FinalLayer's AdaLN output (following DiT paper)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
 
     def forward(
         self,
@@ -426,8 +488,10 @@ class DiT(nn.Module):
 
         timestep = self.timestep_embed(timestep)  # (B, D)
 
-        # Get AdaLN-Zero parameters
-        scales, shifts, gates = self.ada_ln_zero(timestep)
+        # Get AdaLN-Zero parameters (6 per block)
+        shifts_msa, scales_msa, gates_msa, shifts_mlp, scales_mlp, gates_mlp = (
+            self.ada_ln_zero(timestep)
+        )
 
         # Patch embedding
         x = self.patch_embed(x)  # (B, N, D)
@@ -439,13 +503,16 @@ class DiT(nn.Module):
                 x,
                 text_embeds=text_embeds,
                 text_mask=text_mask,
-                scale=scales[i],
-                shift=shifts[i],
-                gate=gates[i],
+                shift_msa=shifts_msa[i],
+                scale_msa=scales_msa[i],
+                gate_msa=gates_msa[i],
+                shift_mlp=shifts_mlp[i],
+                scale_mlp=scales_mlp[i],
+                gate_mlp=gates_mlp[i],
             )
 
-        # Final layer
-        x = self.final_layer(x)  # (B, C, H, W)
+        # Final layer (with timestep conditioning)
+        x = self.final_layer(x, timestep)  # (B, C, H, W)
 
         return x
 
@@ -490,28 +557,19 @@ class DiT(nn.Module):
 
     def get_model_size_info(self) -> dict:
         """Get model size information."""
-        MODEL_CONFIGS = {
+        ESTIMATED_SIZES = {
             "S": "~30M",
             "B": "~130M",
             "L": "~300M",
             "XL": "~675M",
         }
         return {
-            "model_size": self.hidden_size,
+            "model_size": self.model_size,
+            "hidden_size": self.hidden_size,
             "num_layers": self.num_layers,
             "num_heads": self.num_heads,
             "num_parameters": self.parameters_count(),
-            "estimated_size": MODEL_CONFIGS.get(
-                next(
-                    (
-                        k
-                        for k, v in {"S": 384, "B": 768, "L": 1024, "XL": 1152}.items()
-                        if v == self.hidden_size
-                    ),
-                    "S",
-                ),
-                "~30M",
-            ),
+            "estimated_size": ESTIMATED_SIZES.get(self.model_size, "~30M"),
         }
 
 

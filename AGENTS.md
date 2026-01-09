@@ -1,6 +1,6 @@
 # AGENTS.md - Developer Guide for AI Coding Agents
 
-This guide provides essential information for AI coding agents working on the PixMoji-Diffusion project.
+This guide provides essential information for AI coding agents working on the text-to-emoji project.
 
 ## 🛠️ Build, Lint, and Test Commands
 
@@ -323,4 +323,4 @@ uv run pytest --lf tests/
 ---
 
 **Last Updated**: 2025-01-09
-**Project**: PixMoji-Diffusion v0.1.0
+**Project**: text-to-emoji v0.1.0

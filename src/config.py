@@ -1,4 +1,4 @@
-"""Centralized configuration and hyperparameters for PixMoji-Diffusion."""
+"""Centralized configuration and hyperparameters for text-to-emoji."""
 
 from __future__ import annotations
 
@@ -251,7 +251,7 @@ class ProjectConfig:
 
 def get_parser() -> argparse.ArgumentParser:
     """Create argument parser for command-line interface."""
-    parser = argparse.ArgumentParser(description="PixMoji-Diffusion: Text-to-Pixel Art Generator")
+    parser = argparse.ArgumentParser(description="text-to-emoji: Text-to-Pixel Art Generator")
 
     # Project arguments
     parser.add_argument(
@@ -445,7 +445,7 @@ def get_config(args: argparse.Namespace | None = None) -> dict:
 def print_config(config: dict) -> None:
     """Print configuration summary."""
     print("\n" + "=" * 60)
-    print("PixMoji-Diffusion Configuration")
+    print("text-to-emoji Configuration")
     print("=" * 60)
 
     for section, cfg in config.items():

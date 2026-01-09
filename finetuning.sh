@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# PixMoji-Diffusion Fine-tuning Script
+# text-to-emoji Fine-tuning Script
 # =============================================================================
 #
 # This script runs Stage 2: Fine-tuning on emoji dataset
@@ -22,7 +22,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}🎨 PixMoji-Diffusion Fine-tuning${NC}"
+echo -e "${GREEN}🎨 text-to-emoji Fine-tuning${NC}"
 echo "=========================================="
 
 # Check if TRAINING_STAGE is set to "finetune"

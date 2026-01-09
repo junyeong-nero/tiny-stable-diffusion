@@ -1,6 +1,6 @@
-# Contributing to PixMoji-Diffusion
+# Contributing to text-to-emoji
 
-Thank you for your interest in contributing to PixMoji-Diffusion! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to text-to-emoji! This document provides guidelines and instructions for contributing to the project.
 
 ## Table of Contents
 
@@ -332,4 +332,4 @@ git push origin feature/add-lora-support
 - Join our [Discord](DISCORD_LINK) (if available)
 - Check existing [Issues](https://github.com/YOUR_USERNAME/text-to-emoji/issues)
 
-Thank you for contributing to PixMoji-Diffusion! 🎨
+Thank you for contributing to text-to-emoji! 🎨

@@ -18,9 +18,13 @@ class SimpleDummyModel(nn.Module):
         self.conv = nn.Conv2d(channels, channels, 3, padding=1)
 
     def forward(
-        self, x: torch.Tensor, timesteps: torch.Tensor, text_embeds: torch.Tensor
+        self,
+        x: torch.Tensor,
+        timesteps: torch.Tensor,
+        text_embeds: torch.Tensor,
+        text_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        # Ignore timesteps and text for this simple test
+        # Ignore timesteps, text, and mask for this simple test
         return self.conv(x)
 
 

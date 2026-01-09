@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# PixMoji-Diffusion Pretraining Script
+# text-to-emoji Pretraining Script
 # =============================================================================
 #
 # This script runs Stage 1: Pretraining on CIFAR-100
@@ -18,7 +18,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}🚀 PixMoji-Diffusion Pretraining${NC}"
+echo -e "${GREEN}🚀 text-to-emoji Pretraining${NC}"
 echo "============================================"
 
 echo -e "${YELLOW}📊 Pretraining on CIFAR-100 (60,000 images)${NC}"

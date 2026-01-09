@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PixMoji-Diffusion Training Script.
+"""text-to-emoji Training Script.
 
 Two-stage training pipeline:
 - Stage 1: Pretrain on CIFAR-100 with text conditioning

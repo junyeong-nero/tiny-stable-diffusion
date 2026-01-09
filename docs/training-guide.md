@@ -1,6 +1,6 @@
 # Training Guide
 
-Comprehensive guide for training PixMoji-Diffusion models.
+Comprehensive guide for training text-to-emoji models.
 
 ## Table of Contents
 

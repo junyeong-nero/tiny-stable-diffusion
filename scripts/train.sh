@@ -1,5 +1,5 @@
 #!/bin/bash
-# Train PixMoji-Diffusion model
+# Train text-to-emoji model
 
 set -e
 
@@ -9,7 +9,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}🚀 Training PixMoji-Diffusion${NC}"
+echo -e "${GREEN}🚀 Training text-to-emoji${NC}"
 echo "========================================"
 
 # Default values

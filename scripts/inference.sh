@@ -1,5 +1,5 @@
 #!/bin/bash
-# Generate emoji images using trained PixMoji-Diffusion model
+# Generate emoji images using trained text-to-emoji model
 
 set -e
 
@@ -10,7 +10,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${GREEN}🎨 PixMoji-Diffusion Inference${NC}"
+echo -e "${GREEN}🎨 text-to-emoji Inference${NC}"
 echo "========================================"
 
 # Default values

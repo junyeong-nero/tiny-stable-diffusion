@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PixMoji-Diffusion - Text-to-Emoji Generator.
+"""text-to-emoji - Text-to-Emoji Generator.
 
 A diffusion transformer model for generating emoji images from text prompts.
 
@@ -546,7 +546,7 @@ def generate(
 def demo() -> None:
     """Interactive demo mode."""
     print("=" * 60)
-    print("PixMoji-Diffusion Interactive Demo")
+    print("text-to-emoji Interactive Demo")
     print("=" * 60)
     print("\nEnter prompts to generate images. Type 'quit' to exit.\n")
 

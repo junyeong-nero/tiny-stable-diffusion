@@ -1,1 +1,1 @@
-"""Test suite for PixMoji-Diffusion."""
+"""Test suite for text-to-emoji."""

@@ -291,22 +291,18 @@ class Diffusion:
 
         # Get sampling timesteps
         if use_ddim:
-            # Use evenly spaced steps for DDIM
+            # Use evenly spaced steps for DDIM (from T-1 to 0, reversed order)
+            # Example: num_timesteps=1000, num_steps=50 -> [999, 979, 959, ..., 19, 0]
             step_indices = torch.linspace(0, self.num_timesteps - 1, num_steps + 1)
             step_indices = step_indices.long()
-            timesteps = torch.zeros(num_steps, dtype=torch.long, device=device)
-
-            for i, idx in enumerate(reversed(step_indices[:-1])):
-                if idx > 0:
-                    timesteps[i] = idx
-                else:
-                    timesteps[i] = self.num_timesteps - 1
+            # Reverse to go from high timesteps to low (T-1 -> 0)
+            timesteps = torch.flip(step_indices, dims=[0])[:-1].to(device)
         else:
-            # Use all timesteps for DDPM
-            timesteps = torch.arange(self.num_timesteps - 1, -1, -1)
+            # Use all timesteps for DDPM (from T-1 to 0)
+            timesteps = torch.arange(self.num_timesteps - 1, -1, -1, device=device)
 
-        # Sampling loop
-        for i, t in enumerate(tqdm.tqdm(reversed(timesteps), desc="Sampling")):
+        # Sampling loop (timesteps are already in descending order)
+        for t in tqdm.tqdm(timesteps, desc="Sampling"):
             t_batch = torch.full((B,), t, device=device, dtype=torch.long)
 
             if use_ddim:
