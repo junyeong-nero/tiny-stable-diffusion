@@ -170,11 +170,10 @@ def train_one_epoch(
         images = batch["image"].to(device)
         captions = batch["caption"]
 
-        # Get text embeddings and attention mask
+        # Get text embeddings
         with torch.no_grad():
-            text_embeds, text_mask = clip_encoder.encode(captions)
+            text_embeds = clip_encoder.encode(captions)
             text_embeds = text_embeds.to(device)
-            text_mask = text_mask.to(device)
 
         # Random timesteps
         timesteps = torch.randint(
@@ -188,14 +187,14 @@ def train_one_epoch(
 
         if use_amp and device.type == "cuda":
             with torch.cuda.amp.autocast():
-                loss = diffusion.training_loss(model, images, timesteps, text_embeds, text_mask)
+                loss = diffusion.training_loss(model, images, timesteps, text_embeds)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
         else:
-            loss = diffusion.training_loss(model, images, timesteps, text_embeds, text_mask)
+            loss = diffusion.training_loss(model, images, timesteps, text_embeds)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -223,9 +222,8 @@ def generate_samples(
     """Generate validation samples."""
     model.eval()
 
-    text_embeds, text_mask = clip_encoder.encode(prompts)
+    text_embeds = clip_encoder.encode(prompts)
     text_embeds = text_embeds.to(device)
-    text_mask = text_mask.to(device)
 
     original_scale = diffusion.guidance_scale
     diffusion.guidance_scale = guidance_scale
@@ -234,7 +232,6 @@ def generate_samples(
         model=model,
         shape=(len(prompts), 3, 32, 32),
         text_embeds=text_embeds,
-        text_mask=text_mask,
         num_steps=50,
         use_ddim=True,
         use_cfg=True,

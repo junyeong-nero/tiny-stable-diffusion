@@ -32,7 +32,6 @@ class Diffusion:
         cfg_probability: float = 0.1,
         epsilon: float = 1e-8,
         uncond_embed: torch.Tensor | None = None,
-        uncond_mask: torch.Tensor | None = None,
         min_snr_gamma: float = 5.0,
     ) -> None:
         self.num_timesteps = num_timesteps
@@ -43,7 +42,6 @@ class Diffusion:
 
         # Unconditional embedding for classifier-free guidance (empty string "" embedding)
         self.uncond_embed = uncond_embed
-        self.uncond_mask = uncond_mask
 
         # Define beta schedule
         if beta_schedule == "cosine":
@@ -60,26 +58,20 @@ class Diffusion:
         # Precompute diffusion parameters
         alphas = 1.0 - betas
         self.alphas_cumprod = torch.cumprod(alphas, dim=0)
-        self.alphas_cumprod_prev = torch.cat(
-            [torch.tensor([1.0]), self.alphas_cumprod[:-1]]
-        )
+        self.alphas_cumprod_prev = torch.cat([torch.tensor([1.0]), self.alphas_cumprod[:-1]])
 
         # For DDIM sampling
         self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
         self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
         self.sqrt_recip_alphas_cumprod = torch.sqrt(1.0 / self.alphas_cumprod)
-        self.sqrt_recip_alphas_cumprod_minus_1 = torch.sqrt(
-            1.0 / self.alphas_cumprod - 1
-        )
+        self.sqrt_recip_alphas_cumprod_minus_1 = torch.sqrt(1.0 / self.alphas_cumprod - 1)
 
         # Posterior mean and variance for DDPM
         self.posterior_mean_coef1 = (
             betas * torch.sqrt(self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
         )
         self.posterior_mean_coef2 = (
-            (1.0 - self.alphas_cumprod_prev)
-            * torch.sqrt(alphas)
-            / (1.0 - self.alphas_cumprod)
+            (1.0 - self.alphas_cumprod_prev) * torch.sqrt(alphas) / (1.0 - self.alphas_cumprod)
         )
         self.posterior_variance = (
             betas * (1.0 - self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
@@ -100,9 +92,7 @@ class Diffusion:
         """
         steps = self.num_timesteps + 1
         x = torch.linspace(0, self.num_timesteps, steps)
-        alphas_cumprod = (
-            torch.cos(((x / self.num_timesteps) + s) / (1 + s) * math.pi * 0.5) ** 2
-        )
+        alphas_cumprod = torch.cos(((x / self.num_timesteps) + s) / (1 + s) * math.pi * 0.5) ** 2
         alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
         betas = 1.0 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
         betas = torch.clip(betas, 0.0, 0.999)
@@ -127,9 +117,7 @@ class Diffusion:
         if noise is None:
             noise = torch.randn_like(x_0)
 
-        sqrt_alphas_cumprod_t = self._extract(
-            self.sqrt_alphas_cumprod, timesteps, x_0.shape
-        )
+        sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, timesteps, x_0.shape)
         sqrt_one_minus_alphas_cumprod_t = self._extract(
             self.sqrt_one_minus_alphas_cumprod, timesteps, x_0.shape
         )
@@ -142,7 +130,6 @@ class Diffusion:
         x_t: torch.Tensor,
         timesteps: torch.Tensor,
         text_embeds: torch.Tensor,
-        text_mask: torch.Tensor | None = None,
         use_cfg: bool = True,
     ) -> torch.Tensor:
         """DDPM reverse process: denoise one step.
@@ -151,8 +138,7 @@ class Diffusion:
             model: Diffusion model
             x_t: Noisy image at timestep t
             timesteps: Current timestep (B,)
-            text_embeds: Text embeddings (B, L, D)
-            text_mask: Attention mask for text (B, L), optional (True = attend)
+            text_embeds: Text embeddings (B, D)
             use_cfg: Whether to use classifier-free guidance
 
         Returns:
@@ -161,19 +147,14 @@ class Diffusion:
         B, C, H, W = x_t.shape
 
         # Predict noise (conditional)
-        predicted_noise = model(x_t, timesteps, text_embeds, text_mask)
+        predicted_noise = model(x_t, timesteps, text_embeds)
 
         # Apply classifier-free guidance during sampling
         if use_cfg and self.guidance_scale != 1.0 and self.uncond_embed is not None:
             # Get unconditional prediction using pre-computed uncond_embed
             uncond_embed = self.uncond_embed.to(x_t.device)
-            uncond_mask = (
-                self.uncond_mask.to(x_t.device)
-                if self.uncond_mask is not None
-                else None
-            )
             with torch.no_grad():
-                unconditional_noise = model(x_t, timesteps, uncond_embed, uncond_mask)
+                unconditional_noise = model(x_t, timesteps, uncond_embed)
             # CFG: noise = uncond + scale * (cond - uncond)
             predicted_noise = unconditional_noise + self.guidance_scale * (
                 predicted_noise - unconditional_noise
@@ -183,9 +164,7 @@ class Diffusion:
         # x_0 = (x_t - sqrt(1 - alpha_cumprod) * noise) / sqrt(alpha_cumprod)
         pred_x_0 = (
             self._extract(self.sqrt_recip_alphas_cumprod, timesteps, x_t.shape) * x_t
-            - self._extract(
-                self.sqrt_recip_alphas_cumprod_minus_1, timesteps, x_t.shape
-            )
+            - self._extract(self.sqrt_recip_alphas_cumprod_minus_1, timesteps, x_t.shape)
             * predicted_noise
         )
         # Clamp to valid range for stability
@@ -218,7 +197,6 @@ class Diffusion:
         x_t: torch.Tensor,
         timesteps: torch.Tensor,
         text_embeds: torch.Tensor,
-        text_mask: torch.Tensor | None = None,
         eta: float = 0.0,
         use_cfg: bool = True,
     ) -> torch.Tensor:
@@ -228,16 +206,12 @@ class Diffusion:
         t_index = timesteps[0].item()
 
         # 1. Predict noise (epsilon_theta)
-        predicted_noise = model(x_t, timesteps, text_embeds, text_mask)
+        predicted_noise = model(x_t, timesteps, text_embeds)
 
         if use_cfg and self.guidance_scale != 1.0 and self.uncond_embed is not None:
             # Get unconditional prediction using pre-computed uncond_embed
             uncond_embed = self.uncond_embed.to(x_t.device)
-            uncond_mask = (
-                self.uncond_mask.to(x_t.device)
-                if self.uncond_mask is not None
-                else None
-            )
+            uncond_mask = self.uncond_mask.to(x_t.device) if self.uncond_mask is not None else None
             with torch.no_grad():
                 unconditional_noise = model(x_t, timesteps, uncond_embed, uncond_mask)
             predicted_noise = unconditional_noise + self.guidance_scale * (
@@ -246,9 +220,7 @@ class Diffusion:
 
         # 2. Get alpha constants
         alpha_t = self.alphas_cumprod[t_index]
-        alpha_t_prev = (
-            self.alphas_cumprod[t_index - 1] if t_index > 0 else torch.tensor(1.0)
-        )
+        alpha_t_prev = self.alphas_cumprod[t_index - 1] if t_index > 0 else torch.tensor(1.0)
 
         # Move to device
         alpha_t = alpha_t.to(x_t.device)
@@ -257,9 +229,7 @@ class Diffusion:
         # 3. Predict x_0 (Clamped)
         # x_0 = (x_t - sqrt(1-alpha_t) * eps) / sqrt(alpha_t)
         sqrt_one_minus_alpha_t = torch.sqrt(1.0 - alpha_t)
-        pred_x_0 = (x_t - sqrt_one_minus_alpha_t * predicted_noise) / torch.sqrt(
-            alpha_t
-        )
+        pred_x_0 = (x_t - sqrt_one_minus_alpha_t * predicted_noise) / torch.sqrt(alpha_t)
         pred_x_0 = torch.clamp(pred_x_0, -1.0, 1.0)
 
         # 4. Compute variance (sigma) for eta
@@ -287,7 +257,6 @@ class Diffusion:
         model: nn.Module,
         shape: tuple[int, int, int, int],
         text_embeds: torch.Tensor,
-        text_mask: torch.Tensor | None = None,
         num_steps: int = 50,
         eta: float = 0.0,
         use_ddim: bool = True,
@@ -299,8 +268,7 @@ class Diffusion:
         Args:
             model: Diffusion model
             shape: Output shape (B, C, H, W)
-            text_embeds: Text embeddings (B, L, D)
-            text_mask: Attention mask for text (B, L), optional (True = attend)
+            text_embeds: Text embeddings (B, D)
             num_steps: Number of sampling steps
             eta: DDIM stochasticity parameter
             use_ddim: Use DDIM (True) or DDPM (False)
@@ -341,14 +309,11 @@ class Diffusion:
                     x_t,
                     t_batch,
                     text_embeds,
-                    text_mask,
                     eta=eta,
                     use_cfg=use_cfg,
                 )
             else:
-                x_t = self.p_sample(
-                    model, x_t, t_batch, text_embeds, text_mask, use_cfg=use_cfg
-                )
+                x_t = self.p_sample(model, x_t, t_batch, text_embeds, use_cfg=use_cfg)
 
         # Normalize to [0, 1]
         x_t = (x_t + 1.0) / 2.0
@@ -392,9 +357,7 @@ class Diffusion:
         Returns:
             Loss weights (B,)
         """
-        snr = self._extract(
-            self.snr, timesteps, (timesteps.shape[0], 1, 1, 1)
-        ).squeeze()
+        snr = self._extract(self.snr, timesteps, (timesteps.shape[0], 1, 1, 1)).squeeze()
         # min(SNR, gamma) / SNR = clamp(gamma / SNR, max=1.0)
         weights = torch.clamp(self.min_snr_gamma / snr, max=1.0)
         return weights
@@ -405,7 +368,6 @@ class Diffusion:
         x_0: torch.Tensor,
         timesteps: torch.Tensor,
         text_embeds: torch.Tensor,
-        text_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Calculate training loss with CFG Dropout and Min-SNR weighting.
 
@@ -426,20 +388,13 @@ class Diffusion:
             if drop_mask.any():
                 text_embeds = text_embeds.clone()
                 uncond_embed = self.uncond_embed.to(x_0.device)
-                uncond_mask = (
-                    self.uncond_mask.to(x_0.device)
-                    if self.uncond_mask is not None
-                    else None
-                )
 
                 # Replace dropped samples with unconditional embedding
                 for i in range(batch_size):
                     if drop_mask[i]:
                         text_embeds[i] = uncond_embed[0]
-                        if text_mask is not None and uncond_mask is not None:
-                            text_mask[i] = uncond_mask[0]
 
-        predicted_noise = model(x_t, timesteps, text_embeds, text_mask)
+        predicted_noise = model(x_t, timesteps, text_embeds)
 
         # Compute per-sample MSE loss
         mse_loss = nn.functional.mse_loss(predicted_noise, noise, reduction="none")

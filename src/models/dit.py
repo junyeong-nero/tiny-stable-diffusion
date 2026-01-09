@@ -11,7 +11,6 @@ from typing import Literal
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class PatchEmbed(nn.Module):
@@ -124,9 +123,7 @@ class AdaLNZero(nn.Module):
 
         for i in range(self.num_layers):
             params = temb[:, i, :]  # (B, D*6)
-            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = params.chunk(
-                6, dim=-1
-            )
+            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = params.chunk(6, dim=-1)
             shifts_msa.append(shift_msa[:, None, :])  # (B, 1, D)
             scales_msa.append(scale_msa[:, None, :])
             gates_msa.append(gate_msa[:, None, :])
@@ -194,7 +191,6 @@ class DiTBlock(nn.Module):
         self,
         x: torch.Tensor,
         text_embeds: torch.Tensor | None = None,
-        text_mask: torch.Tensor | None = None,
         shift_msa: torch.Tensor | None = None,
         scale_msa: torch.Tensor | None = None,
         gate_msa: torch.Tensor | None = None,
@@ -207,7 +203,6 @@ class DiTBlock(nn.Module):
         Args:
             x: Input tokens (B, N, D)
             text_embeds: Text conditioning (B, L, D), optional
-            text_mask: Attention mask for text (B, L), optional (True = attend)
             shift_msa: AdaLN shift for self-attention (B, 1, D)
             scale_msa: AdaLN scale for self-attention (B, 1, D)
             gate_msa: AdaLN gate for self-attention (B, 1, D)
@@ -231,36 +226,7 @@ class DiTBlock(nn.Module):
         # Cross-Attention with text conditioning (no AdaLN modulation)
         if text_embeds is not None:
             x_norm = self.norm2(x)
-            # Use attention mask if provided to ignore padding tokens
-            if text_mask is not None:
-                # text_mask shape: (B, L) where 1 = real token, 0 = padding/unconditional
-                # Convert to boolean: True = attend, False = skip
-                text_mask_bool = text_mask.bool()  # (B, L)
-
-                # Check if ALL samples have at least one valid token
-                all_have_valid = text_mask_bool.all(dim=-1)  # (B,)
-
-                if all_have_valid.all():
-                    # All samples have valid tokens, use standard attention
-                    x_cross, _ = self.cross_attn(x_norm, text_embeds, text_embeds)
-                else:
-                    # Some samples have no valid tokens (CFG dropout)
-                    # We need to handle this carefully to avoid NaN
-                    # Strategy: For samples with valid tokens, compute attention normally
-                    # For samples with no valid tokens, skip cross-attention
-
-                    # Compute full cross-attention for all samples
-                    x_cross_all, attn_weights = self.cross_attn(x_norm, text_embeds, text_embeds)
-
-                    # Zero out cross-attention output for samples with no valid tokens
-                    # text_mask_bool[:, 0:1] gives us a (B, 1) mask, we need to broadcast to (B, N, D)
-                    valid_mask = text_mask_bool.any(dim=-1, keepdim=True)  # (B, 1)
-                    valid_mask_expanded = valid_mask.unsqueeze(
-                        -1
-                    )  # (B, 1, 1) -> will broadcast to (B, N, D)
-                    x_cross = x_cross_all * valid_mask_expanded
-            else:
-                x_cross, _ = self.cross_attn(x_norm, text_embeds, text_embeds)
+            x_cross, _ = self.cross_attn(x_norm, text_embeds, text_embeds)
             x = x + x_cross
 
         # MLP with AdaLN-Zero modulation
@@ -464,21 +430,23 @@ class DiT(nn.Module):
         x: torch.Tensor,
         timestep: torch.Tensor,
         text_embeds: torch.Tensor,
-        text_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Forward pass.
 
         Args:
             x: Noisy image (B, C, H, W)
             timestep: Diffusion timestep (B,) or timestep embedding
-            text_embeds: Text embeddings from CLIP (B, L, D_clip)
-            text_mask: Attention mask for text (B, L), optional (True = attend)
+            text_embeds: Text embeddings from CLIP (B, D_clip)
 
         Returns:
             Predicted noise (B, C, H, W)
         """
+        # Add sequence dimension for cross-attention: (B, D) -> (B, 1, D)
+        if text_embeds.dim() == 2:
+            text_embeds = text_embeds.unsqueeze(1)
+
         # Project text embeddings to hidden size
-        text_embeds = self.text_proj(text_embeds)  # (B, L, D_hidden)
+        text_embeds = self.text_proj(text_embeds)  # (B, 1, D_hidden)
 
         # Get timestep embedding
         if isinstance(timestep, torch.Tensor) and timestep.dim() == 1:
@@ -489,8 +457,8 @@ class DiT(nn.Module):
         timestep = self.timestep_embed(timestep)  # (B, D)
 
         # Get AdaLN-Zero parameters (6 per block)
-        shifts_msa, scales_msa, gates_msa, shifts_mlp, scales_mlp, gates_mlp = (
-            self.ada_ln_zero(timestep)
+        shifts_msa, scales_msa, gates_msa, shifts_mlp, scales_mlp, gates_mlp = self.ada_ln_zero(
+            timestep
         )
 
         # Patch embedding
@@ -502,7 +470,6 @@ class DiT(nn.Module):
             x = block(
                 x,
                 text_embeds=text_embeds,
-                text_mask=text_mask,
                 shift_msa=shifts_msa[i],
                 scale_msa=scales_msa[i],
                 gate_msa=gates_msa[i],
@@ -585,7 +552,7 @@ if __name__ == "__main__":
     # Test forward pass
     x = torch.randn(2, 3, 32, 32)
     t = torch.randint(0, 1000, (2,))
-    text = torch.randn(2, 77, 512)  # CLIP max context length
+    text = torch.randn(2, 1, 512)  # CLIP pooled embedding (B, 1, D)
 
     with torch.no_grad():
         out = model(x, t, text)

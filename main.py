@@ -52,7 +52,7 @@ TRAINING_STAGE: str = "pretrain"  # Change to "finetune" for Stage 2
 PRETRAIN_CONFIG: dict[str, Any] = {
     "data_source": "cifar100",
     "epochs": 200,  # Quick test run
-    "batch_size": 128,  # Smaller batch for MPS
+    "batch_size": 4,  # Smaller batch for MPS
     "learning_rate": 1e-4,
     "image_size": 32,
     "initial_cfg_prob": 0.0,
@@ -85,7 +85,7 @@ COMMON_CONFIG: dict[str, Any] = {
     "use_ema": True,
     "ema_decay": 0.9999,
     "mixed_precision": False,
-    "device": "cuda",  # Force CUDA for training
+    "device": "auto",  # Force CUDA for training
     "seed": 42,
     "validation_prompts": ["rocket", "cat", "robot", "star", "heart"],
     "validation_interval": 5,
@@ -166,9 +166,8 @@ def train_one_epoch(
         captions = batch["caption"]
 
         with torch.no_grad():
-            text_embeds, text_mask = clip_encoder.encode(captions)
+            text_embeds = clip_encoder.encode(captions)
             text_embeds = text_embeds.to(device)
-            text_mask = text_mask.to(device)
 
         timesteps = torch.randint(
             0,
@@ -181,18 +180,14 @@ def train_one_epoch(
 
         if use_amp and device.type == "cuda":
             with torch.cuda.amp.autocast():
-                loss = diffusion.training_loss(
-                    model, images, timesteps, text_embeds, text_mask
-                )
+                loss = diffusion.training_loss(model, images, timesteps, text_embeds)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
         else:
-            loss = diffusion.training_loss(
-                model, images, timesteps, text_embeds, text_mask
-            )
+            loss = diffusion.training_loss(model, images, timesteps, text_embeds)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -234,9 +229,8 @@ def generate_samples(
     """Generate validation samples."""
     model.eval()
 
-    text_embeds, text_mask = clip_encoder.encode(prompts)
+    text_embeds = clip_encoder.encode(prompts)
     text_embeds = text_embeds.to(device)
-    text_mask = text_mask.to(device)
 
     original_scale = diffusion.guidance_scale
     diffusion.guidance_scale = guidance_scale
@@ -245,7 +239,6 @@ def generate_samples(
         model=model,
         shape=(len(prompts), 3, 32, 32),
         text_embeds=text_embeds,
-        text_mask=text_mask,
         num_steps=50,
         use_ddim=True,
         use_cfg=True,
@@ -338,9 +331,8 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
     # Compute unconditional embedding for classifier-free guidance (empty string)
     print("Computing unconditional embedding...")
     with torch.no_grad():
-        uncond_embed, uncond_mask = clip_encoder.encode([""])
+        uncond_embed = clip_encoder.encode([""])
     uncond_embed = uncond_embed.to(device)
-    uncond_mask = uncond_mask.to(device) if uncond_mask is not None else None
 
     print(f"Initializing DiT-{config['model_size']}...")
     model = DiT(
@@ -371,7 +363,6 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
         guidance_scale=config["guidance_scale"],
         cfg_probability=config.get("cfg_prob", config.get("initial_cfg_prob", 0.1)),
         uncond_embed=uncond_embed,
-        uncond_mask=uncond_mask,
     )
 
     optimizer = torch.optim.AdamW(
@@ -548,9 +539,8 @@ def generate(
 
     # Compute unconditional embedding for classifier-free guidance
     with torch.no_grad():
-        uncond_embed, uncond_mask = clip_encoder.encode([""])
+        uncond_embed = clip_encoder.encode([""])
     uncond_embed = uncond_embed.to(device)
-    uncond_mask = uncond_mask.to(device) if uncond_mask is not None else None
 
     print(f"Loading checkpoint: {checkpoint}")
     checkpoint = torch.load(checkpoint, map_location=device)
@@ -577,7 +567,6 @@ def generate(
         beta_schedule="cosine",
         guidance_scale=guidance_scale,
         uncond_embed=uncond_embed,
-        uncond_mask=uncond_mask,
     )
 
     print(f"\nGenerating {num_samples} image(s) for {len(prompts)} prompt(s)...")
@@ -586,9 +575,8 @@ def generate(
     for i, prompt in enumerate(prompts):
         print(f"  [{i + 1}/{len(prompts)}] '{prompt}'")
 
-        text_embeds, text_mask = clip_encoder.encode([prompt] * num_samples)
+        text_embeds = clip_encoder.encode([prompt] * num_samples)
         text_embeds = text_embeds.to(device)
-        text_mask = text_mask.to(device)
 
         images = diffusion.sample(
             model=model,
@@ -639,9 +627,8 @@ def demo() -> None:
 
     # Compute unconditional embedding for classifier-free guidance
     with torch.no_grad():
-        uncond_embed, uncond_mask = clip_encoder.encode([""])
+        uncond_embed = clip_encoder.encode([""])
     uncond_embed = uncond_embed.to(device)
-    uncond_mask = uncond_mask.to(device) if uncond_mask is not None else None
 
     checkpoint = torch.load(checkpoint, map_location=device)
     model_config = checkpoint.get("model_config", {})
@@ -661,7 +648,6 @@ def demo() -> None:
         beta_schedule="cosine",
         guidance_scale=7.5,
         uncond_embed=uncond_embed,
-        uncond_mask=uncond_mask,
     )
 
     while True:
@@ -673,15 +659,13 @@ def demo() -> None:
                 continue
 
             print(f"Generating: '{prompt}'...")
-            text_embeds, text_mask = clip_encoder.encode([prompt])
+            text_embeds = clip_encoder.encode([prompt])
             text_embeds = text_embeds.to(device)
-            text_mask = text_mask.to(device)
 
             images = diffusion.sample(
                 model=model,
                 shape=(1, 3, 32, 32),
                 text_embeds=text_embeds,
-                text_mask=text_mask,
                 num_steps=50,
                 use_ddim=True,
                 use_cfg=True,

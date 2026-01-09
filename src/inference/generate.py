@@ -90,7 +90,9 @@ def main() -> None:
     device = torch.device(
         "cuda"
         if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available() else "cpu"
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
     )
     print(f"Using device: {device}")
 
@@ -153,9 +155,8 @@ def main() -> None:
 
     for prompt_text in prompts:
         print(f"Encoding prompt: '{prompt_text}'")
-        text_embeds, text_mask = clip_encoder.encode([prompt_text] * inference_config.num_samples)
+        text_embeds = clip_encoder.encode([prompt_text] * inference_config.num_samples)
         text_embeds = text_embeds.to(device)
-        text_mask = text_mask.to(device)
 
         print(f"Generating {inference_config.num_samples} image(s) for {prompt_text}...")
         shape = (
@@ -170,7 +171,6 @@ def main() -> None:
                 model=model,
                 shape=shape,
                 text_embeds=text_embeds,
-                text_mask=text_mask,
                 num_steps=inference_config.num_steps,
                 use_ddim=getattr(args, "ddim", True),
                 use_cfg=True,
