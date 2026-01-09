@@ -162,7 +162,7 @@ class EmojiDataset(Dataset):
 class CIFAR100Dataset(Dataset):
     """CIFAR-100 dataset wrapper for text-to-image generation.
 
-    Uses CIFAR-100 coarse or fine labels as text prompts.
+    Uses torchvision.datasets.CIFAR100 with its built-in class names.
 
     Dataset source: torchvision.datasets.CIFAR100
 
@@ -185,108 +185,18 @@ class CIFAR100Dataset(Dataset):
         self.train = train
         self.use_coarse_labels = use_coarse_labels
 
-        # CIFAR-100 class names
-        self.fine_labels = [
-            "apple",
-            "aquarium_fish",
-            "baby",
-            "bear",
-            "beaver",
-            "bed",
-            "bee",
-            "beetle",
-            "bicycle",
-            "bottle",
-            "bowl",
-            "boy",
-            "bridge",
-            "bus",
-            "butterfly",
-            "camel",
-            "can",
-            "castle",
-            "caterpillar",
-            "chair",
-            "chicken",
-            "cloud",
-            "cockroach",
-            "couch",
-            "crab",
-            "crocodile",
-            "cup",
-            "dinosaur",
-            "dolphin",
-            "elephant",
-            "flatfish",
-            "forest",
-            "fox",
-            "girl",
-            "hamster",
-            "house",
-            "kangaroo",
-            "keyboard",
-            "lamp",
-            "lawn_mower",
-            "leopard",
-            "lion",
-            "lizard",
-            "lobster",
-            "man",
-            "maple_tree",
-            "motorcycle",
-            "mountain",
-            "mouse",
-            "mushroom",
-            "oak_tree",
-            "orange",
-            "orchid",
-            "otter",
-            "palm_tree",
-            "pear",
-            "pickup_truck",
-            "pine_tree",
-            "plain",
-            "plate",
-            "poppy",
-            "porcupine",
-            "possum",
-            "rabbit",
-            "raccoon",
-            "ray",
-            "road",
-            "rocket",
-            "rose",
-            "sea",
-            "seal",
-            "shark",
-            "shrew",
-            "skunk",
-            "skyscraper",
-            "snail",
-            "snake",
-            "spider",
-            "squirrel",
-            "streetcar",
-            "sunflower",
-            "sweet_pepper",
-            "table",
-            "tank",
-            "telephone",
-            "television",
-            "tiger",
-            "tractor",
-            "train",
-            "trout",
-            "tulip",
-            "turtle",
-            "wardrobe",
-            "whale",
-            "willow_tree",
-            "wolf",
-            "woman",
-            "worm",
-        ]
+        # Load CIFAR-100 from torchvision (classes are available after download)
+        self.dataset = CIFAR100(
+            root=str(self.root),
+            train=train,
+            transform=transform,
+            download=download,
+        )
 
+        # Use torchvision's built-in class names
+        self.fine_labels: list[str] = self.dataset.classes
+
+        # CIFAR-100 coarse labels (20 superclasses)
         self.coarse_labels = [
             "aquatic_mammals",
             "fish",
@@ -423,14 +333,6 @@ class CIFAR100Dataset(Dataset):
             1,
             2,
         ]
-
-        # Load CIFAR-100
-        self.dataset = CIFAR100(
-            root=str(self.root),
-            train=train,
-            transform=transform,
-            download=download,
-        )
 
         if transform is None:
             self.transform = transforms.Compose(
