@@ -24,6 +24,11 @@ except ImportError:
     MMDI_AVAILABLE = False
 
 
+# =============================================================================
+# Common Components (shared by both DiT and MMDiT)
+# =============================================================================
+
+
 class PatchEmbed(nn.Module):
     """Convert image to patch embeddings.
 
@@ -77,6 +82,16 @@ class PositionEmbed(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Add positional embeddings to input."""
         return x + self.pos_embed
+
+
+def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    """Apply adaptive modulation (shift and scale) to normalized input."""
+    return x * (1 + scale) + shift
+
+
+# =============================================================================
+# Vanilla DiT Components
+# =============================================================================
 
 
 class AdaLNZero(nn.Module):
@@ -143,11 +158,6 @@ class AdaLNZero(nn.Module):
             gates_mlp.append(gate_mlp[:, None, :])
 
         return shifts_msa, scales_msa, gates_msa, shifts_mlp, scales_mlp, gates_mlp
-
-
-def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
-    """Apply adaptive modulation (shift and scale) to normalized input."""
-    return x * (1 + scale) + shift
 
 
 class DiTBlock(nn.Module):
@@ -308,19 +318,22 @@ class FinalLayer(nn.Module):
         return x
 
 
-class DiT(nn.Module):
-    """Diffusion Transformer (DiT) or MMDiT Model.
+# =============================================================================
+# Vanilla DiT Model (Cross-Attention)
+# =============================================================================
+
+
+class VanillaDiT(nn.Module):
+    """Standard Diffusion Transformer with Cross-Attention.
 
     Architecture:
         Input Image -> Patch Embed -> Position Embed -> DiT Blocks -> Final Layer -> Output Image
 
     Conditioning:
         - Timestep: Via AdaLN-Zero in each block
-        - Text: Via Cross-Attention in each block (DiT) or Joint Attention (MMDiT)
+        - Text: Via Cross-Attention in each block
 
-    Supports two model types:
-        - "dit": Standard DiT with cross-attention for text conditioning
-        - "mmdit": Multi-Modal DiT from Stable Diffusion 3 with joint text-image attention
+    From "Scalable Diffusion Models with Transformers" (Google Research, 2023).
     """
 
     def __init__(
@@ -333,9 +346,6 @@ class DiT(nn.Module):
         attn_dropout: float = 0.0,
         mlp_dropout: float = 0.0,
         mlp_ratio: float = 4.0,
-        model_type: Literal["dit", "mmdit"] = "dit",
-        qk_rmsnorm: bool = True,
-        register_tokens: int = 0,
     ) -> None:
         super().__init__()
 
@@ -353,46 +363,11 @@ class DiT(nn.Module):
         self.image_size = image_size
         self.patch_size = patch_size
         self.model_size = model_size
-        self.model_type = model_type
         self.hidden_size = config["hidden"]
         self.num_layers = config["layers"]
         self.num_heads = config["heads"]
         self.clip_embed_dim = clip_embed_dim
 
-        if model_type == "mmdit":
-            if not MMDI_AVAILABLE:
-                raise ImportError("mmdit is not installed. Install with: pip install mmdit")
-            self._init_mmdit(
-                in_channels,
-                image_size,
-                patch_size,
-                clip_embed_dim,
-                mlp_ratio,
-                qk_rmsnorm,
-                register_tokens,
-            )
-        else:
-            self._init_standard_dit(
-                in_channels,
-                image_size,
-                patch_size,
-                clip_embed_dim,
-                mlp_ratio,
-                attn_dropout,
-                mlp_dropout,
-            )
-
-    def _init_standard_dit(
-        self,
-        in_channels: int,
-        image_size: int,
-        patch_size: int,
-        clip_embed_dim: int,
-        mlp_ratio: float,
-        attn_dropout: float,
-        mlp_dropout: float,
-    ) -> None:
-        """Initialize standard DiT with cross-attention."""
         # Patch embedding
         self.patch_embed = PatchEmbed(in_channels, self.hidden_size, patch_size, image_size)
         self.num_patches = self.patch_embed.num_patches
@@ -432,50 +407,6 @@ class DiT(nn.Module):
 
         # Initialize weights
         self._init_weights()
-
-    def _init_mmdit(
-        self,
-        in_channels: int,
-        image_size: int,
-        patch_size: int,
-        clip_embed_dim: int,
-        mlp_ratio: float,
-        qk_rmsnorm: bool,
-        register_tokens: int,
-    ) -> None:
-        """Initialize MMDiT from lucidrains/mmdit library."""
-        # For MMDiT, we use dim_image as hidden_size and dim_cond for timestep conditioning
-        self.mmdit = MMDitModel(
-            depth=self.num_layers,
-            dim_image=self.hidden_size,
-            dim_text=clip_embed_dim,
-            dim_cond=self.hidden_size,  # Enable timestep conditioning
-            num_register_tokens=register_tokens,
-            qk_rmsnorm=qk_rmsnorm,
-        )
-
-        # Patch embedding for images (output dimension = hidden_size)
-        self.patch_embed = PatchEmbed(in_channels, self.hidden_size, patch_size, image_size)
-        self.num_patches = self.patch_embed.num_patches
-
-        # Position embedding for image tokens
-        self.pos_embed = PositionEmbed(self.num_patches, self.hidden_size)
-
-        # Register tokens count (stored for forward pass)
-        self.register_tokens = register_tokens
-
-        # Timestep embedding
-        self.timestep_embed = nn.Sequential(
-            nn.Linear(self.hidden_size, self.hidden_size),
-            nn.SiLU(),
-            nn.Linear(self.hidden_size, self.hidden_size),
-        )
-
-        # Final layer to decode patch embeddings to image
-        self.final_layer = FinalLayer(self.hidden_size, patch_size, in_channels)
-
-        # Initialize weights
-        self._init_weights_mmdit()
 
     def _init_weights(self) -> None:
         """Initialize weights following DiT paper.
@@ -526,26 +457,40 @@ class DiT(nn.Module):
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
 
-    def _init_weights_mmdit(self) -> None:
-        """Initialize weights for MMDiT model."""
-        # Initialize patch embed projection
-        nn.init.xavier_uniform_(self.patch_embed.proj.weight)
-        nn.init.constant_(self.patch_embed.proj.bias, 0)
+    def _get_timestep_embedding(
+        self,
+        timesteps: torch.Tensor,
+        max_period: int = 10000,
+    ) -> torch.Tensor:
+        """Create sinusoidal timestep embedding.
 
-        # Initialize pos embed
-        nn.init.normal_(self.pos_embed.pos_embed, std=0.02)
+        Args:
+            timesteps: Tensor of timesteps (B,)
+            max_period: Maximum period for cosine embedding
 
-        # Initialize timestep embed
-        for layer in self.timestep_embed:
-            if isinstance(layer, nn.Linear):
-                nn.init.xavier_uniform_(layer.weight)
-                nn.init.constant_(layer.bias, 0)
+        Returns:
+            Timestep embedding (B, D)
+        """
+        half = self.hidden_size // 2
+        # Use the same dtype as the model parameters for consistency
+        model_dtype = self.dtype
+        model_device = next(self.parameters()).device
 
-        # Initialize final layer
-        nn.init.xavier_uniform_(self.final_layer.linear.weight)
-        nn.init.constant_(self.final_layer.linear.bias, 0)
-        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
-        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
+        freqs = torch.exp(
+            -math.log(max_period)
+            * torch.arange(half, dtype=model_dtype, device=model_device)
+            / half
+        )
+        args = timesteps[:, None].float() * freqs[None]
+        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+        return embedding.to(dtype=model_dtype)
+
+    @property
+    def dtype(self) -> torch.dtype:
+        """Get model dtype from first parameter."""
+        for param in self.parameters():
+            return param.dtype
+        return torch.float32
 
     def forward(
         self,
@@ -563,18 +508,6 @@ class DiT(nn.Module):
         Returns:
             Predicted noise (B, C, H, W)
         """
-        if self.model_type == "mmdit":
-            return self._forward_mmdit(x, timestep, text_embeds)
-        else:
-            return self._forward_standard_dit(x, timestep, text_embeds)
-
-    def _forward_standard_dit(
-        self,
-        x: torch.Tensor,
-        timestep: torch.Tensor,
-        text_embeds: torch.Tensor,
-    ) -> torch.Tensor:
-        """Forward pass for standard DiT with cross-attention."""
         # Add sequence dimension for cross-attention: (B, D) -> (B, 1, D)
         if text_embeds.dim() == 2:
             text_embeds = text_embeds.unsqueeze(1)
@@ -617,15 +550,165 @@ class DiT(nn.Module):
 
         return x
 
-    def _forward_mmdit(
+    def parameters_count(self) -> int:
+        """Count total parameters."""
+        return sum(p.numel() for p in self.parameters())
+
+
+# =============================================================================
+# MMDiT Model (Joint Text-Image Attention)
+# =============================================================================
+
+
+class MMDiT(nn.Module):
+    """Multi-Modal Diffusion Transformer from Stable Diffusion 3.
+
+    Architecture:
+        - Uses joint text-image attention instead of cross-attention
+        - Text and image tokens attend to each other in unified attention
+        - Supports qk_rmsnorm and register_tokens for improved training
+
+    From "Scaling Rectified Flow Transformers for High-Resolution Image Synthesis"
+    (Esser et al., 2024): https://arxiv.org/abs/2403.03206
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 3,
+        image_size: int = 32,
+        patch_size: int = 2,
+        model_size: Literal["S", "B", "L", "XL"] = "S",
+        clip_embed_dim: int = 512,
+        qk_rmsnorm: bool = True,
+        register_tokens: int = 0,
+    ) -> None:
+        super().__init__()
+
+        if not MMDI_AVAILABLE:
+            raise ImportError("mmdit is not installed. Install with: pip install mmdit")
+
+        # Load model size configuration
+        MODEL_CONFIGS = {
+            "S": {"layers": 12, "heads": 6, "hidden": 384},
+            "B": {"layers": 12, "heads": 12, "hidden": 768},
+            "L": {"layers": 24, "heads": 16, "hidden": 1024},
+            "XL": {"layers": 28, "heads": 16, "hidden": 1152},
+        }
+
+        config = MODEL_CONFIGS[model_size]
+
+        self.in_channels = in_channels
+        self.image_size = image_size
+        self.patch_size = patch_size
+        self.model_size = model_size
+        self.hidden_size = config["hidden"]
+        self.num_layers = config["layers"]
+        self.num_heads = config["heads"]
+        self.clip_embed_dim = clip_embed_dim
+
+        # MMDiT model from lucidrains
+        self.mmdit = MMDitModel(
+            depth=self.num_layers,
+            dim_image=self.hidden_size,
+            dim_text=clip_embed_dim,
+            dim_cond=self.hidden_size,  # Enable timestep conditioning
+            num_register_tokens=register_tokens,
+            qk_rmsnorm=qk_rmsnorm,
+        )
+
+        # Patch embedding for images
+        self.patch_embed = PatchEmbed(in_channels, self.hidden_size, patch_size, image_size)
+        self.num_patches = self.patch_embed.num_patches
+
+        # Position embedding for image tokens
+        self.pos_embed = PositionEmbed(self.num_patches, self.hidden_size)
+
+        # Register tokens count (stored for forward pass)
+        self.register_tokens = register_tokens
+
+        # Timestep embedding
+        self.timestep_embed = nn.Sequential(
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.SiLU(),
+            nn.Linear(self.hidden_size, self.hidden_size),
+        )
+
+        # Final layer to decode patch embeddings to image
+        self.final_layer = FinalLayer(self.hidden_size, patch_size, in_channels)
+
+        # Initialize weights
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        """Initialize weights for MMDiT model."""
+        # Initialize patch embed projection
+        nn.init.xavier_uniform_(self.patch_embed.proj.weight)
+        nn.init.constant_(self.patch_embed.proj.bias, 0)
+
+        # Initialize pos embed
+        nn.init.normal_(self.pos_embed.pos_embed, std=0.02)
+
+        # Initialize timestep embed
+        for layer in self.timestep_embed:
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_uniform_(layer.weight)
+                nn.init.constant_(layer.bias, 0)
+
+        # Initialize final layer
+        nn.init.xavier_uniform_(self.final_layer.linear.weight)
+        nn.init.constant_(self.final_layer.linear.bias, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
+
+    def _get_timestep_embedding(
+        self,
+        timesteps: torch.Tensor,
+        max_period: int = 10000,
+    ) -> torch.Tensor:
+        """Create sinusoidal timestep embedding.
+
+        Args:
+            timesteps: Tensor of timesteps (B,)
+            max_period: Maximum period for cosine embedding
+
+        Returns:
+            Timestep embedding (B, D)
+        """
+        half = self.hidden_size // 2
+        model_dtype = self.dtype
+        model_device = next(self.parameters()).device
+
+        freqs = torch.exp(
+            -math.log(max_period)
+            * torch.arange(half, dtype=model_dtype, device=model_device)
+            / half
+        )
+        args = timesteps[:, None].float() * freqs[None]
+        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+        return embedding.to(dtype=model_dtype)
+
+    @property
+    def dtype(self) -> torch.dtype:
+        """Get model dtype from first parameter."""
+        for param in self.parameters():
+            return param.dtype
+        return torch.float32
+
+    def forward(
         self,
         x: torch.Tensor,
         timestep: torch.Tensor,
         text_embeds: torch.Tensor,
     ) -> torch.Tensor:
-        """Forward pass for MMDiT with joint text-image attention.
+        """Forward pass.
 
-        MMDiT uses joint attention where text and image tokens attend to each other.
+        Args:
+            x: Noisy image (B, C, H, W)
+            timestep: Diffusion timestep (B,) or timestep embedding
+            text_embeds: Text embeddings from CLIP (B, D_clip)
+
+        Returns:
+            Predicted noise (B, C, H, W)
         """
         # Get timestep embedding
         if isinstance(timestep, torch.Tensor) and timestep.dim() == 1:
@@ -658,78 +741,206 @@ class DiT(nn.Module):
 
         return x
 
-    def _get_timestep_embedding(
-        self,
-        timesteps: torch.Tensor,
-        max_period: int = 10000,
-    ) -> torch.Tensor:
-        """Create sinusoidal timestep embedding.
-
-        Args:
-            timesteps: Tensor of timesteps (B,)
-            max_period: Maximum period for cosine embedding
-
-        Returns:
-            Timestep embedding (B, D)
-        """
-        half = self.hidden_size // 2
-        # Use the same dtype as the model parameters for consistency
-        model_dtype = self.dtype
-        model_device = next(self.parameters()).device
-
-        freqs = torch.exp(
-            -math.log(max_period)
-            * torch.arange(half, dtype=model_dtype, device=model_device)
-            / half
-        )
-        args = timesteps[:, None].float() * freqs[None]
-        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-        return embedding.to(dtype=model_dtype)
-
-    @property
-    def dtype(self) -> torch.dtype:
-        """Get model dtype from first parameter."""
-        for param in self.parameters():
-            return param.dtype
-        return torch.float32
-
     def parameters_count(self) -> int:
         """Count total parameters."""
         return sum(p.numel() for p in self.parameters())
 
+
+# =============================================================================
+# DiT Factory (Unified Interface)
+# =============================================================================
+
+
+class DiT(nn.Module):
+    """Unified DiT model supporting both Vanilla DiT and MMDiT.
+
+    Factory class that returns the appropriate model based on model_type.
+
+    Args:
+        in_channels: Number of input channels (default: 3 for RGB)
+        image_size: Input image size (default: 32)
+        patch_size: Patch size for patch embedding (default: 2)
+        model_size: Model size - S, B, L, or XL
+        clip_embed_dim: CLIP text embedding dimension
+        attn_dropout: Attention dropout probability
+        mlp_dropout: MLP dropout probability
+        mlp_ratio: MLP hidden dimension ratio
+        model_type: "dit" for Vanilla DiT, "mmdit" for Multi-Modal DiT
+        qk_rmsnorm: Use RMSNorm for QK attention (MMDiT only)
+        register_tokens: Number of register tokens (MMDiT only)
+
+    Returns:
+        VanillaDiT if model_type="dit", MMDiT if model_type="mmdit"
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 3,
+        image_size: int = 32,
+        patch_size: int = 2,
+        model_size: Literal["S", "B", "L", "XL"] = "S",
+        clip_embed_dim: int = 512,
+        attn_dropout: float = 0.0,
+        mlp_dropout: float = 0.0,
+        mlp_ratio: float = 4.0,
+        model_type: Literal["dit", "mmdit"] = "dit",
+        qk_rmsnorm: bool = True,
+        register_tokens: int = 0,
+    ) -> None:
+        super().__init__()
+
+        self.model_type = model_type
+
+        if model_type == "mmdit":
+            self.model = MMDiT(
+                in_channels=in_channels,
+                image_size=image_size,
+                patch_size=patch_size,
+                model_size=model_size,
+                clip_embed_dim=clip_embed_dim,
+                qk_rmsnorm=qk_rmsnorm,
+                register_tokens=register_tokens,
+            )
+        else:
+            self.model = VanillaDiT(
+                in_channels=in_channels,
+                image_size=image_size,
+                patch_size=patch_size,
+                model_size=model_size,
+                clip_embed_dim=clip_embed_dim,
+                attn_dropout=attn_dropout,
+                mlp_dropout=mlp_dropout,
+                mlp_ratio=mlp_ratio,
+            )
+
+        # Copy attributes for compatibility
+        self.in_channels = self.model.in_channels
+        self.image_size = self.model.image_size
+        self.patch_size = self.model.patch_size
+        self.model_size = self.model.model_size
+        self.hidden_size = self.model.hidden_size
+        self.num_layers = self.model.num_layers
+        self.num_heads = self.model.num_heads
+        self.clip_embed_dim = self.model.clip_embed_dim
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        timestep: torch.Tensor,
+        text_embeds: torch.Tensor,
+    ) -> torch.Tensor:
+        """Forward pass.
+
+        Args:
+            x: Noisy image (B, C, H, W)
+            timestep: Diffusion timestep (B,) or timestep embedding
+            text_embeds: Text embeddings from CLIP (B, D_clip)
+
+        Returns:
+            Predicted noise (B, C, H, W)
+        """
+        return self.model(x, timestep, text_embeds)
+
+    @property
+    def dtype(self) -> torch.dtype:
+        """Get model dtype from first parameter."""
+        return self.model.dtype
+
+    def parameters_count(self) -> int:
+        """Count total parameters."""
+        return self.model.parameters_count()
+
     def get_model_size_info(self) -> dict:
         """Get model size information."""
         ESTIMATED_SIZES = {
-            "S": "~30M",
-            "B": "~130M",
-            "L": "~300M",
-            "XL": "~675M",
+            "S": "~30M (DiT) / ~132M (MMDiT)",
+            "B": "~130M (DiT) / ~300M (MMDiT)",
+            "L": "~300M (DiT) / ~675M (MMDiT)",
+            "XL": "~675M (DiT) / ~780M (MMDiT)",
         }
         return {
             "model_size": self.model_size,
+            "model_type": self.model_type,
             "hidden_size": self.hidden_size,
             "num_layers": self.num_layers,
             "num_heads": self.num_heads,
             "num_parameters": self.parameters_count(),
-            "estimated_size": ESTIMATED_SIZES.get(self.model_size, "~30M"),
+            "estimated_size": ESTIMATED_SIZES.get(self.model_size, "Unknown"),
         }
 
 
-if __name__ == "__main__":
-    # Quick test
-    model = DiT(model_size="S", patch_size=2, image_size=32)
-    info = model.get_model_size_info()
-    print(f"DiT-S Parameters: {info['num_parameters']:,}")
-    print(f"Hidden Size: {info['model_size']}")
-    print(f"Layers: {info['num_layers']}")
-    print(f"Heads: {info['num_heads']}")
+# =============================================================================
+# Utility Functions
+# =============================================================================
 
-    # Test forward pass
+
+def create_dit_model(
+    model_type: Literal["dit", "mmdit"] = "dit",
+    **kwargs,
+) -> VanillaDiT | MMDiT:
+    """Factory function to create DiT or MMDiT model.
+
+    Args:
+        model_type: "dit" for Vanilla DiT, "mmdit" for Multi-Modal DiT
+        **kwargs: Additional arguments passed to model constructor
+
+    Returns:
+        VanillaDiT or MMDiT model instance
+    """
+    if model_type == "mmdit":
+        if not MMDI_AVAILABLE:
+            raise ImportError("mmdit is not installed. Install with: pip install mmdit")
+        return MMDiT(**kwargs)
+    return VanillaDiT(**kwargs)
+
+
+if __name__ == "__main__":
+    # Test both models
+    print("=" * 60)
+    print("Testing VanillaDiT")
+    print("=" * 60)
+    model = VanillaDiT(model_size="S", patch_size=2, image_size=32)
+    info = model.parameters_count()
+    print(f"Parameters: {info:,}")
+
     x = torch.randn(2, 3, 32, 32)
     t = torch.randint(0, 1000, (2,))
-    text = torch.randn(2, 1, 512)  # CLIP pooled embedding (B, 1, D)
+    text = torch.randn(2, 1, 512)
 
     with torch.no_grad():
         out = model(x, t, text)
     print(f"Input shape: {x.shape}")
     print(f"Output shape: {out.shape}")
+    print()
+
+    print("=" * 60)
+    print("Testing MMDiT")
+    print("=" * 60)
+    if MMDI_AVAILABLE:
+        model = MMDiT(model_size="S", patch_size=2, image_size=32)
+        info = model.parameters_count()
+        print(f"Parameters: {info:,}")
+
+        x = torch.randn(2, 3, 32, 32)
+        t = torch.randint(0, 1000, (2,))
+        text = torch.randn(2, 512)
+
+        with torch.no_grad():
+            out = model(x, t, text)
+        print(f"Input shape: {x.shape}")
+        print(f"Output shape: {out.shape}")
+    else:
+        print("MMDiT not available (install mmdit to test)")
+    print()
+
+    print("=" * 60)
+    print("Testing unified DiT factory")
+    print("=" * 60)
+    model = DiT(model_size="S", model_type="dit")
+    info = model.get_model_size_info()
+    print(f"DiT-S: {info}")
+
+    if MMDI_AVAILABLE:
+        model = DiT(model_size="S", model_type="mmdit")
+        info = model.get_model_size_info()
+        print(f"MMDiT-S: {info}")
