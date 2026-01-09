@@ -11,7 +11,7 @@ model_type: mmdit
 pretrain:
     data_source: cifar100
     epochs: 200
-    batch_size: 8
+    batch_size: 32
     learning_rate: 1.0e-4
     image_size: 32
     initial_cfg_prob: 0.0
@@ -35,7 +35,7 @@ finetune:
 # Common Settings (shared by both stages)
 common:
     # Model configuration
-    model_size: S  # Options: S (30M), B (130M), L (300M), XL (675M) for DiT; ~2-3x more for MMDiT
+    model_size: S # Options: S (30M), B (130M), L (300M), XL (675M) for DiT; ~2-3x more for MMDiT
     patch_size: 2
     num_timesteps: 1000
     beta_schedule: cosine

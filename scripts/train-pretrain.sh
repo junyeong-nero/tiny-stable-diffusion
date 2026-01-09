@@ -1,1 +1,1 @@
-uv run main.py --pretrain
+uv run main.py --pretrain --wandb
