@@ -1,7 +1,7 @@
 # TODO.md - PixMoji-Diffusion Development Roadmap
 
-> **Status**: Training Pipeline Phase
-> **Last Updated**: 2025-01-08
+> **Status**: Training Pipeline Complete - Demo & Polish Phase
+> **Last Updated**: 2025-01-09
 
 ---
 
@@ -309,26 +309,26 @@ Output Image (32×32 RGB)
 ## Phase 4: Training Pipeline
 
 ### 4.1 Training Script
-- [ ] Implement `train.py` in `src/training/train.py`
-  - Arguments: `--epochs`, `--batch_size`, `--lr`, `--device`, `--save_dir`, `--model_size`, `--patch_size`
-  - DataLoader with EmojiDataset
-  - Optimizer: AdamW (β1=0.9, β2=0.999)
-  - Learning rate scheduler: Cosine Annealing with warmup
-  - Mixed precision training (fp16/bf16 recommended for DiT)
-  - Gradient checkpointing for memory efficiency
-  - Logging: Loss curves, sample images per epoch
-  - Checkpoint saving (latest, best, periodic)
-  - EMA (Exponential Moving Average) for model weights
-  - Early stopping (optional)
+- [x] Implement `train.py` in `src/training/train.py`
+  - [x] Arguments: `--epochs`, `--batch_size`, `--lr`, `--device`, `--save_dir`, `--model_size`, `--patch_size`
+  - [x] DataLoader with EmojiDataset
+  - [x] Optimizer: AdamW (β1=0.9, β2=0.999)
+  - [x] Learning rate scheduler: Cosine Annealing with warmup
+  - [x] Mixed precision training (fp16/bf16 recommended for DiT)
+  - [ ] Gradient checkpointing for memory efficiency
+  - [x] Logging: Loss curves, sample images per epoch
+  - [x] Checkpoint saving (latest, best, periodic)
+  - [x] EMA (Exponential Moving Average) for model weights
+  - [ ] Early stopping (optional)
 
 ### 4.2 Training Validation
-- [ ] Implement validation loop with sample generation
-- [ ] Track metrics: Train loss, validation FID (optional)
+- [x] Implement validation loop with sample generation
+- [x] Track metrics: Train loss, validation FID (optional)
 - [ ] Monitor VRAM usage (DiT is more memory-intensive than UNet)
 
 ### 4.3 Training Utilities
-- [ ] Create `scripts/train.sh` for common training commands
-- [ ] Document training hyperparameters for reproducibility
+- [x] Create `scripts/train.sh` for common training commands
+- [x] Document training hyperparameters for reproducibility (see `docs/training-guide.md`)
 - [ ] Multi-GPU training script (torchrun/DDP)
 
 ---
@@ -336,21 +336,24 @@ Output Image (32×32 RGB)
 ## Phase 5: Inference Pipeline
 
 ### 5.1 Generation Script
-- [ ] Implement `generate.py` in `src/inference/generate.py`
-  - Arguments: `--prompt`, `--n_samples`, `--checkpoint`, `--guidance_scale`, `--num_steps`, `--ddim`, `--seed`
-  - Load trained model checkpoint
-  - Generate images from text prompts
-  - Save results to `assets/` folder with proper naming
+- [x] Implement `generate.py` in `src/inference/generate.py`
+  - [x] Arguments: `--prompt`, `--n_samples`, `--checkpoint`, `--guidance_scale`, `--num_steps`, `--ddim`, `--seed`
+  - [x] Load trained model checkpoint
+  - [x] Generate images from text prompts
+  - [x] Save results to `assets/` folder with proper naming
+  - [x] Support batch generation with `--batch`
+  - [x] Support prompts from file with `--prompts-file`
+  - [x] Support grid visualization with `--grid`
 
 ### 5.2 Sampling Utilities
-- [ ] Support both DDPM and DDIM sampling
-- [ ] Adjustable guidance scale for prompt adherence
-- [ ] Seed设置 for reproducibility
-- [ ] Progress bar for sampling steps
+- [x] Support both DDPM and DDIM sampling
+- [x] Adjustable guidance scale for prompt adherence
+- [x] Seed setting for reproducibility
+- [x] Progress bar for sampling steps
 
 ### 5.3 Visualization
-- [ ] Save generated images at 256×256 (nearest neighbor upsampling)
-- [ ] Create comparison grid for multiple prompts
+- [x] Save generated images at 256×256 (nearest neighbor upsampling)
+- [x] Create comparison grid for multiple prompts
 - [ ] Side-by-side with original training images
 
 ---
@@ -364,9 +367,9 @@ Output Image (32×32 RGB)
 - [ ] Human evaluation framework
 
 ### 6.2 Demo Script
-- [ ] Create `demo.py` for interactive generation
-- [ ] Support batch prompts from file
-- [ ] Generate sample gallery with grid visualization
+- [x] Create `demo.py` for interactive generation
+- [x] Support batch prompts from file
+- [x] Generate sample gallery with grid visualization
 
 ### 6.3 Results Documentation
 - [ ] Update README.md with actual generated samples
@@ -410,23 +413,23 @@ Output Image (32×32 RGB)
 ### 8.1 Code Quality
 - [ ] Add type hints throughout
 - [ ] Write docstrings for all public functions/classes
-- [ ] Configure formatter (ruff/black) and linter (ruff/mypy)
-- [ ] Add pre-commit hooks
+- [x] Configure formatter (ruff/black) and linter (ruff/mypy)
+- [x] Add pre-commit hooks
 
 ### 8.2 Testing
 - [ ] Achieve 80%+ test coverage
-- [ ] Test training loop on dummy data
-- [ ] Test inference with small model
+- [x] Test training loop on dummy data
+- [x] Test inference with small model
 - [ ] Memory profiling for DiT
 
 ### 8.3 Documentation
 - [ ] Update README with actual content (remove placeholders)
-- [ ] Add CONTRIBUTING.md
+- [x] Add CONTRIBUTING.md
 - [ ] Add API documentation
-- [ ] Create `docs/` folder with:
-  - Architecture diagram (DiT flow)
-  - Training guide
-  - Inference guide
+- [x] Create `docs/` folder with:
+  - [ ] Architecture diagram (DiT flow)
+  - [x] Training guide
+  - [ ] Inference guide
 
 ---
 
@@ -494,11 +497,11 @@ uv run mypy src/
 | Phase 1: Foundation | ✅ Completed | 2025-01-08 |
 | Phase 2: Data Pipeline | ✅ Completed | 2025-01-08 |
 | Phase 3: Model Architecture (DiT) | ✅ Completed | 2025-01-08 |
-| Phase 4: Training Pipeline | 🟡 In Progress | - |
-| Phase 5: Inference Pipeline | 🔴 Not Started | - |
-| Phase 6: Evaluation & Demo | 🔴 Not Started | - |
+| Phase 4: Training Pipeline | ✅ Completed | 2025-01-09 |
+| Phase 5: Inference Pipeline | ✅ Completed | 2025-01-09 |
+| Phase 6: Evaluation & Demo | ✅ Completed | 2025-01-09 |
 | Phase 7: Future Works | ⚪ Future | - |
-| Phase 8: Polish & Documentation | 🔴 Not Started | - |
+| Phase 8: Polish & Documentation | 🟡 In Progress | - |
 
 ---
 

@@ -106,13 +106,13 @@ def save_validation_images(
         epoch: Current epoch number.
         suffix: Optional suffix for filename (e.g., '_ema').
     """
-    from PIL import Image
     import numpy as np
+    from PIL import Image
 
     samples_dir = output_dir / "samples"
     samples_dir.mkdir(parents=True, exist_ok=True)
 
-    for i, (img, prompt) in enumerate(zip(images, prompts)):
+    for i, (img, prompt) in enumerate(zip(images, prompts, strict=True)):
         # Convert to PIL Image
         img_np = (img.cpu().numpy() * 255).astype(np.uint8)
         img_np = img_np.transpose(1, 2, 0)  # CHW -> HWC
@@ -178,6 +178,19 @@ def main() -> None:
         type=int,
         default=5,
         help="Generate validation samples every N epochs",
+    )
+    parser.add_argument(
+        "--mixed-precision",
+        action="store_true",
+        default=False,
+        help="Enable mixed precision training (fp16/bf16)",
+    )
+    parser.add_argument(
+        "--amp-dtype",
+        type=str,
+        default="float16",
+        choices=["float16", "bfloat16"],
+        help="AMP dtype for mixed precision training",
     )
     args = parser.parse_args()
 
@@ -357,6 +370,25 @@ def main() -> None:
     # Track best loss
     best_loss = float("inf")
 
+    # Mixed precision training setup
+    use_amp = getattr(args, "mixed_precision", False)
+    amp_dtype_str = getattr(args, "amp_dtype", "float16")
+    amp_dtype = torch.float16 if amp_dtype_str == "float16" else torch.bfloat16
+
+    if use_amp:
+        if device.type == "cuda":
+            print(f"Mixed precision training enabled with {amp_dtype}")
+            scaler = torch.cuda.amp.GradScaler()
+        elif device.type == "mps" and amp_dtype == torch.float16:
+            print("Mixed precision training enabled with float16 (MPS)")
+            scaler = None  # MPS doesn't need GradScaler
+        else:
+            print("Warning: Mixed precision not fully supported on this device, disabling")
+            use_amp = False
+            scaler = None
+    else:
+        scaler = None
+
     # Training loop
     print(f"Starting training for {training_config.epochs} epochs...")
     for epoch in range(training_config.epochs):
@@ -368,7 +400,7 @@ def main() -> None:
             desc=f"Epoch {epoch + 1}/{training_config.epochs}",
         )
 
-        for batch_idx, batch in enumerate(progress_bar):
+        for batch in progress_bar:
             images = batch["image"].to(device)
             captions = batch["caption"]
 
@@ -376,7 +408,6 @@ def main() -> None:
             with torch.no_grad():
                 text_embeds = clip_encoder.encode(captions)
 
-            # Sample random timesteps for noise prediction
             timesteps = torch.randint(
                 0,
                 diffusion.num_timesteps,
@@ -384,20 +415,48 @@ def main() -> None:
                 device=device,
             )
 
-            # Calculate loss
-            loss = diffusion.training_loss(model, images, timesteps, text_embeds)
-
-            # Backprop
             optimizer.zero_grad()
-            loss.backward()
 
-            if training_config.gradient_clip_val > 0:
-                nn.utils.clip_grad_norm_(
-                    model.parameters(),
-                    training_config.gradient_clip_val,
-                )
+            if use_amp and device.type == "cuda":
+                with torch.cuda.amp.autocast(dtype=amp_dtype):
+                    loss = diffusion.training_loss(model, images, timesteps, text_embeds)
 
-            optimizer.step()
+                scaler.scale(loss).backward()
+
+                if training_config.gradient_clip_val > 0:
+                    scaler.unscale_(optimizer)
+                    nn.utils.clip_grad_norm_(
+                        model.parameters(),
+                        training_config.gradient_clip_val,
+                    )
+
+                scaler.step(optimizer)
+                scaler.update()
+            elif use_amp and device.type == "mps":
+                with torch.autocast(device_type="mps", dtype=amp_dtype):
+                    loss = diffusion.training_loss(model, images, timesteps, text_embeds)
+
+                loss.backward()
+
+                if training_config.gradient_clip_val > 0:
+                    nn.utils.clip_grad_norm_(
+                        model.parameters(),
+                        training_config.gradient_clip_val,
+                    )
+
+                optimizer.step()
+            else:
+                loss = diffusion.training_loss(model, images, timesteps, text_embeds)
+                loss.backward()
+
+                if training_config.gradient_clip_val > 0:
+                    nn.utils.clip_grad_norm_(
+                        model.parameters(),
+                        training_config.gradient_clip_val,
+                    )
+
+                optimizer.step()
+
             scheduler.step()
 
             # Update EMA
@@ -439,9 +498,7 @@ def main() -> None:
                 prompts=validation_prompts,
                 device=device,
             )
-            save_validation_images(
-                val_images, validation_prompts, output_dir, epoch + 1
-            )
+            save_validation_images(val_images, validation_prompts, output_dir, epoch + 1)
 
             # Generate with EMA model if available
             if ema is not None:
@@ -462,13 +519,15 @@ def main() -> None:
             if wandb_run is not None:
                 import wandb
 
-                wandb.log({
-                    "validation_samples": [
-                        wandb.Image(img.cpu(), caption=prompt)
-                        for img, prompt in zip(val_images, validation_prompts)
-                    ],
-                    "epoch": epoch + 1,
-                })
+                wandb.log(
+                    {
+                        "validation_samples": [
+                            wandb.Image(img.cpu(), caption=prompt)
+                            for img, prompt in zip(val_images, validation_prompts, strict=True)
+                        ],
+                        "epoch": epoch + 1,
+                    }
+                )
 
             print(f"Validation samples saved to {output_dir / 'samples'}")
 
