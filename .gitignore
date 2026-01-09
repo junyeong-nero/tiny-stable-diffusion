@@ -8,8 +8,8 @@ wandb/
 # Model checkpoints
 checkpoints/
 
-# Data directory (downloaded datasets)
-data/
+# Data directory (downloaded datasets) - ignore contents but not src/ subdirectory
+data/*
 
 # Python-generated files
 __pycache__/

@@ -1,0 +1,70 @@
+"""Dataset loading utilities."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from torch.utils.data import DataLoader, Dataset
+
+from src.data.dataset import CIFAR100Dataset, EmojiDataset
+
+
+def get_dataset(config: dict[str, Any]) -> Dataset:
+    """Create dataset based on config.
+
+    Args:
+        config: Configuration dictionary with data_source and related settings
+
+    Returns:
+        Dataset instance
+
+    Raises:
+        ValueError: If data_source is unknown
+    """
+    data_source = config["data_source"]
+
+    if data_source == "local":
+        local_path = config.get("local_dataset_path")
+        print(f"Loading local dataset from: {local_path}")
+        return EmojiDataset(dataset_name=local_path, split="train")
+
+    elif data_source == "huggingface":
+        dataset_name = config.get("dataset_name", "junyeong-nero/emoji-32")
+        print(f"Loading Hugging Face dataset: {dataset_name}")
+        return EmojiDataset(dataset_name=dataset_name, split="train")
+
+    elif data_source == "cifar100":
+        use_coarse = config.get("use_coarse_labels", False)
+        print("Loading CIFAR-100 dataset")
+        return CIFAR100Dataset(train=True, use_coarse_labels=use_coarse)
+
+    else:
+        raise ValueError(f"Unknown data_source: {data_source}")
+
+
+def create_dataloader(
+    dataset: Dataset,
+    batch_size: int = 64,
+    shuffle: bool = True,
+    num_workers: int = 0,
+    pin_memory: bool = True,
+) -> DataLoader:
+    """Create a DataLoader for the given dataset.
+
+    Args:
+        dataset: Dataset to load
+        batch_size: Batch size
+        shuffle: Whether to shuffle the data
+        num_workers: Number of worker processes
+        pin_memory: Whether to pin memory
+
+    Returns:
+        DataLoader instance
+    """
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
