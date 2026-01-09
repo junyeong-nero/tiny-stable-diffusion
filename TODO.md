@@ -3,6 +3,17 @@
 > **Status**: Training Pipeline Complete - Demo & Polish Phase
 > **Last Updated**: 2025-01-09
 
+## 📊 Quick Summary
+
+| Category | Completed | Remaining | Progress |
+|----------|-----------|-----------|----------|
+| **Core Features** | 6/6 phases | 0 phases | ✅ 100% |
+| **Essential Tasks** | 45+ items | ~15 items | 🟢 75% |
+| **Nice-to-Have** | - | ~20 items | 🟡 Optional |
+| **Future Works** | - | 8+ items | ⚪ Future |
+
+**Current State**: Project is **production-ready** for training and inference. Remaining work focuses on polish, documentation, and advanced features.
+
 ---
 
 ## 🎯 Project Overview
@@ -502,6 +513,104 @@ uv run mypy src/
 | Phase 6: Evaluation & Demo | ✅ Completed | 2025-01-09 |
 | Phase 7: Future Works | ⚪ Future | - |
 | Phase 8: Polish & Documentation | 🟡 In Progress | - |
+
+---
+
+## 🚀 Remaining Works
+
+### High Priority (P1)
+
+**Phase 6: Evaluation & Demo**
+- [ ] Calculate FID (Fréchet Inception Distance) vs training set
+- [ ] CLIP Score for text-image alignment
+- [ ] Update README.md with actual generated samples
+- [ ] Add sample images to `assets/` directory
+
+**Phase 8: Polish & Documentation**
+- [ ] Add type hints throughout codebase
+- [ ] Write docstrings for all public functions/classes
+- [ ] Achieve 80%+ test coverage
+- [ ] Update README with actual generated samples (remove placeholders)
+
+### Medium Priority (P2)
+
+**Phase 4: Training Pipeline**
+- [ ] Implement gradient checkpointing for memory efficiency
+- [ ] Multi-GPU training script (torchrun/DDP)
+- [ ] Monitor VRAM usage tracking
+
+**Phase 5: Inference Pipeline**
+- [ ] Side-by-side visualization with original training images
+
+**Phase 6: Evaluation**
+- [ ] Human evaluation framework
+- [ ] Document expected outputs and quality metrics
+
+**Phase 8: Documentation**
+- [ ] Create architecture diagram (DiT flow)
+- [ ] Create inference guide in `docs/`
+- [ ] Add API documentation
+
+### Low Priority (P3)
+
+**Phase 2: Data Pipeline**
+- [ ] Support streaming mode for large datasets
+- [ ] Implement proper caching with `datasets.load_dataset`
+
+**Phase 4: Training**
+- [ ] Early stopping (optional)
+
+**Phase 6: Results**
+- [ ] Compare DiT vs UNet results (if baseline exists)
+
+**Phase 8: Testing**
+- [ ] Memory profiling for DiT
+
+### Future Enhancements (Optional)
+
+**Phase 7: Advanced Features**
+- [ ] Latent DiT (VAE-based, Stable Diffusion style)
+- [ ] Build Streamlit web UI
+- [ ] Deploy to Streamlit Cloud
+- [ ] Integrate `rembg` for background removal
+- [ ] Super-Resolution model (64×64, 128×128)
+- [ ] Advanced sampling methods (DPM-Solver, Flow Matching)
+
+---
+
+## 📝 Work Prioritization
+
+### Next 3 Tasks (Recommended Order)
+
+1. **Generate and Document Samples** (P1)
+   - Train a model to completion
+   - Generate diverse samples
+   - Update README with actual results
+   - Add visual examples to `assets/`
+
+2. **Add Type Hints & Docstrings** (P1)
+   - Improves code maintainability
+   - Better IDE support
+   - Easier for contributors
+
+3. **Increase Test Coverage** (P1)
+   - Target 80%+ coverage
+   - Add integration tests
+   - Test edge cases
+
+### Quick Wins (Can be done in < 1 hour each)
+
+- [ ] Add architecture diagram to `docs/`
+- [ ] Create inference guide in `docs/`
+- [ ] Document FID calculation process
+- [ ] Add example prompts file
+
+### Long-term Goals (Requires significant effort)
+
+- [ ] Multi-GPU training support (DDP)
+- [ ] Gradient checkpointing implementation
+- [ ] Build and deploy web UI
+- [ ] Implement Latent DiT variant
 
 ---
 
