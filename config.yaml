@@ -10,30 +10,30 @@ training_stage: vae_train
 vae_train:
     # Data source: "streaming_caption" for large URL-based datasets
     data_source: streaming_caption
-    dataset_name: dalle-mini/open-images
-    image_field: url  # This dataset uses URL field for images
-    caption_field: caption
+    dataset_name: hmu013/LAION-300k
+    image_field: png # This dataset uses png field for images
+    caption_field: json # Caption is nested in json: {"caption": "..."}
     split: train
 
     # Streaming settings for large datasets
-    buffer_size: 1000  # Shuffle buffer size
-    skip_failures: true  # Skip failed URL downloads
-    url_timeout: 10  # Timeout for URL requests (seconds)
-    max_retries: 3  # Max retries for failed requests
+    buffer_size: 1000 # Shuffle buffer size
+    skip_failures: true # Skip failed URL downloads
+    url_timeout: 10 # Timeout for URL requests (seconds)
+    max_retries: 3 # Max retries for failed requests
 
     # Image settings
-    image_size: 64  # Input image size
+    image_size: 64 # Input image size
 
     # VAE architecture
-    latent_channels: 16  # SD3 style (16 channels)
-    vae_ch: 64  # Base channel count (lightweight)
-    vae_ch_mult: [1, 2, 4, 4]  # f8 compression: 64 -> 8
+    latent_channels: 16 # SD3 style (16 channels)
+    vae_ch: 64 # Base channel count (lightweight)
+    vae_ch_mult: [1, 2, 4, 4] # f8 compression: 64 -> 8
 
     # Training hyperparameters
     epochs: 100
-    batch_size: 32
-    learning_rate: 1.0e-4
-    kl_weight: 1.0e-6  # Beta-VAE weight
+    batch_size: 128
+    learning_rate: 4.0e-4
+    kl_weight: 1.0e-6 # Beta-VAE weight
 
     # Training settings
     mixed_precision: false
@@ -51,21 +51,21 @@ diffusion_train:
     model_type: mmdit
     # Data source: "streaming_caption" for large datasets
     data_source: streaming_caption
-    dataset_name: hmu013/LAION-300k
-    image_field: png  # This dataset uses png field for images
-    caption_field: json  # Caption is nested in json: {"caption": "..."}
+    dataset_name: visual-layer/oxford-iiit-pet-vl-enriched
+    image_field: image
+    caption_field: caption_enriched
     split: train
 
     # Streaming settings for large datasets
-    buffer_size: 1000  # Shuffle buffer size
-    skip_failures: true  # Skip failed samples
-    url_timeout: 10  # Timeout for URL requests (seconds)
-    max_retries: 3  # Max retries for failed requests
+    buffer_size: 1000 # Shuffle buffer size
+    skip_failures: true # Skip failed samples
+    url_timeout: 10 # Timeout for URL requests (seconds)
+    max_retries: 3 # Max retries for failed requests
 
     # Image and latent settings
-    image_size: 64  # Original image size
-    latent_size: 8  # Latent spatial size (64 / 8 = 8)
-    in_channels: 16  # Latent channels (matches VAE)
+    image_size: 64 # Original image size
+    latent_size: 8 # Latent spatial size (64 / 8 = 8)
+    in_channels: 16 # Latent channels (matches VAE)
 
     # Training hyperparameters
     epochs: 200
@@ -83,7 +83,7 @@ diffusion_train:
     checkpoint_dir: checkpoints
 
     # DiT/MMDiT model configuration
-    model_size: S  # Options: S (30M), B (130M), L (300M), XL (675M)
+    model_size: S # Options: S (30M), B (130M), L (300M), XL (675M)
     patch_size: 2
 
     # Diffusion settings
