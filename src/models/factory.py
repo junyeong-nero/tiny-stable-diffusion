@@ -119,10 +119,10 @@ class DiT(nn.Module):
     def get_model_size_info(self) -> dict:
         """Get model size information."""
         ESTIMATED_SIZES = {
-            "S": "~30M (DiT) / ~132M (MMDiT)",
-            "B": "~130M (DiT) / ~300M (MMDiT)",
-            "L": "~300M (DiT) / ~675M (MMDiT)",
-            "XL": "~675M (DiT) / ~780M (MMDiT)",
+            "S": "~40M (DiT) / ~87M (MMDiT)",
+            "B": "~159M (DiT) / ~187M (MMDiT)",
+            "L": "~559M (DiT) / ~559M (MMDiT)",
+            "XL": "~824M (DiT) / ~780M (MMDiT)",
         }
         return {
             "model_size": self.model_size,

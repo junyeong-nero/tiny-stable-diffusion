@@ -128,14 +128,41 @@ Decoder:
 | Channel multipliers | [1, 2, 4, 4] |
 | Parameters | ~21M |
 
-### Diffusion Transformer (DiT)
+### Diffusion Transformer (DiT / MMDiT)
+
+두 가지 아키텍처를 지원합니다:
+
+#### DiT (Vanilla) - Cross-Attention 방식
+```
+Image Tokens → Self-Attention → Cross-Attention(with Text) → MLP → Output
+```
 
 | Size | Layers | Hidden | Heads | Params | 용도 |
 |------|--------|--------|-------|--------|------|
-| **S** | 12 | 384 | 6 | ~40M | 기본값, 빠른 실험 |
-| B | 12 | 768 | 12 | ~130M | 중간 규모 |
-| L | 24 | 1024 | 16 | ~300M | 고품질 |
-| XL | 28 | 1152 | 16 | ~675M | 최고 품질 |
+| **S** | 12 | 384 | 6 | **39.9M** | 기본값, 빠른 실험 |
+| B | 12 | 768 | 12 | **158.8M** | 중간 규모 |
+| L | 24 | 1024 | 16 | **559.0M** | 고품질 |
+| XL | 28 | 1152 | 16 | **824.2M** | 최고 품질 |
+
+#### MMDiT (SD3 스타일) - Joint Attention 방식
+```
+[Text Tokens, Image Tokens] → Joint Self-Attention → Separate MLPs → Output
+```
+
+| Size | Layers | Hidden | Heads | Params | 용도 |
+|------|--------|--------|-------|--------|------|
+| **S** | 12 | 384 | 6 | **87.0M** | 기본값, 권장 |
+| B | 12 | 768 | 12 | **186.9M** | 중간 규모 |
+| L | 24 | 1024 | 16 | **558.9M** | 고품질 |
+| XL | 28 | 1152 | 16 | **780.1M** | 최고 품질 |
+
+**DiT vs MMDiT 비교:**
+| 특징 | DiT | MMDiT |
+|------|-----|-------|
+| Text 처리 | Cross-Attention | Joint Attention |
+| 구조 | 분리된 attention | 통합 attention |
+| 학습 안정성 | 좋음 | 더 좋음 (QK-RMSNorm) |
+| 실제 SD3 | ❌ | ✅ |
 
 **DiT Block 구조:**
 ```
@@ -143,6 +170,13 @@ Input → LayerNorm → Self-Attention → + → LayerNorm → Cross-Attention �
          ↑                           |                                  |               |
          └── AdaLN-Zero (timestep) ──┴──────────────────────────────────┴───────────────┘
                                      (text conditioning)
+```
+
+**MMDiT Block 구조:**
+```
+[Text, Image] → Joint LayerNorm → Joint Self-Attention → Split → Separate MLPs → Output
+                     ↑                                              |
+                     └──────── Time Conditioning ───────────────────┘
 ```
 
 ### 실제 SD3와의 비교
