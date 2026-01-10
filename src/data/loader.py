@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 from src.data.dataset import (
     CIFAR100Dataset,
@@ -114,6 +114,15 @@ def create_dataloader(
     Returns:
         DataLoader instance
     """
+    # IterableDataset does not support shuffle option
+    if isinstance(dataset, IterableDataset):
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+        )
+
     return DataLoader(
         dataset,
         batch_size=batch_size,
