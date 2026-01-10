@@ -35,6 +35,11 @@ vae_train:
     learning_rate: 1.0e-4
     kl_weight: 1.0e-6  # Beta-VAE weight
 
+    # Training settings
+    mixed_precision: false
+    device: auto
+    seed: 42
+
     # Checkpoint
     checkpoint_path: checkpoints/vae.pt
 
