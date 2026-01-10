@@ -1,470 +1,303 @@
-# Training Guide
+# Training Quick Start Guide
 
-Comprehensive guide for training text-to-emoji models.
+> tiny-stable-diffusion 훈련을 위한 빠른 시작 가이드입니다.
+> 더 자세한 내용은 [training-pipeline.md](./training-pipeline.md)를 참조하세요.
 
-## Table of Contents
+## 목차
 
 - [Quick Start](#quick-start)
+- [Configuration](#configuration)
 - [Hyperparameters](#hyperparameters)
-- [Training Configurations](#training-configurations)
 - [Hardware Requirements](#hardware-requirements)
-- [Best Practices](#best-practices)
 - [Troubleshooting](#troubleshooting)
+
+---
 
 ## Quick Start
 
-### Basic Training
+### 1. 환경 설정
 
 ```bash
-./scripts/train.sh --epochs 100 --batch-size 64 --model-size S
+# uv 설치 (권장)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 의존성 설치
+uv sync
+
+# 또는 pip 사용
+pip install -e .
 ```
 
-### Training with Weights & Biases
+### 2. Stage 1: VAE 훈련
 
 ```bash
-./scripts/train.sh --epochs 100 --batch-size 64 --wandb
+# 기본 VAE 훈련
+uv run main.py --train-vae --epochs 100 --batch-size 32
+
+# Wandb 로깅 활성화
+uv run main.py --train-vae --epochs 100 --batch-size 32 --wandb
+
+# 커스텀 데이터셋 사용
+uv run main.py --train-vae --epochs 100 --dataset reach-vb/pokemon-blip-captions
 ```
 
-### Mixed Precision Training
+### 3. Stage 2: Diffusion 훈련
 
 ```bash
-./scripts/train.sh --mixed-precision --amp-dtype float16
+# 기본 Diffusion 훈련 (VAE 필요)
+uv run main.py --train-diffusion --epochs 200 --batch-size 32
+
+# VAE 체크포인트 지정
+uv run main.py --train-diffusion --vae-checkpoint checkpoints/vae.pt --epochs 200
 ```
+
+### 4. 이미지 생성
+
+```bash
+# 단일 이미지 생성
+uv run main.py --generate --prompt "a cute cat"
+
+# 여러 이미지 생성
+uv run main.py --generate --prompt "a robot,a sunset,a mountain" --num-samples 4
+
+# 설정 옵션
+uv run main.py --generate \
+    --prompt "a beautiful landscape" \
+    --steps 50 \
+    --guidance 7.5 \
+    --seed 42
+```
+
+### 5. HuggingFace Hub에 업로드
+
+```bash
+# VAE 훈련 후 업로드
+uv run main.py --train-vae --push-to-hub --hub-model-id username/my-vae
+
+# Diffusion 훈련 후 업로드
+uv run main.py --train-diffusion --push-to-hub --hub-model-id username/my-diffusion
+```
+
+---
+
+## Configuration
+
+### config.yaml 구조
+
+```yaml
+# 현재 훈련 단계
+training_stage: vae_train  # 또는 diffusion_train
+
+# VAE 훈련 설정
+vae_train:
+    data_source: streaming_caption
+    dataset_name: hmu013/LAION-300k
+    image_size: 64
+    latent_channels: 16
+    epochs: 100
+    batch_size: 128
+    learning_rate: 4.0e-4
+    kl_weight: 1.0e-6
+    checkpoint_path: checkpoints/vae.pt
+
+# Diffusion 훈련 설정
+diffusion_train:
+    model_type: mmdit  # dit 또는 mmdit
+    model_size: S      # S, B, L, XL
+    epochs: 200
+    batch_size: 32
+    learning_rate: 1.0e-4
+    guidance_scale: 7.5
+    use_ema: true
+    ema_decay: 0.9999
+    vae_checkpoint: checkpoints/vae.pt
+    checkpoint_path: checkpoints/diffusion.pt
+```
+
+### CLI 우선순위
+
+CLI 인자가 config.yaml 값을 덮어씁니다:
+
+```bash
+# config.yaml에서 epochs=100이어도 CLI가 우선
+uv run main.py --train-vae --epochs 50
+```
+
+---
 
 ## Hyperparameters
 
-### Model Configuration
+### VAE 훈련
 
-| Parameter | Default | Options | Description |
-|-----------|---------|---------|-------------|
-| `--model-size` | S | S, B, L, XL | DiT model size |
-| `--patch-size` | 2 | 1, 2, 4 | Patch tokenization size |
-| `--image-size` | 32 | 32, 64, 128 | Input image resolution |
+| 파라미터 | 기본값 | 권장 범위 | 설명 |
+|----------|--------|-----------|------|
+| `epochs` | 100 | 50-200 | 훈련 에폭 수 |
+| `batch_size` | 128 | 32-256 | 배치 크기 |
+| `learning_rate` | 4e-4 | 1e-4 ~ 1e-3 | 학습률 |
+| `kl_weight` | 1e-6 | 1e-7 ~ 1e-5 | KL 손실 가중치 |
 
-**Model Size Details:**
+### Diffusion 훈련
 
-| Size | Layers | Hidden | Heads | Parameters | VRAM (BS=8) |
-|------|--------|--------|-------|------------|-------------|
-| S | 12 | 384 | 6 | ~30M | ~16GB |
-| B | 12 | 768 | 12 | ~130M | ~32GB |
-| L | 24 | 1024 | 16 | ~300M | ~64GB |
+| 파라미터 | 기본값 | 권장 범위 | 설명 |
+|----------|--------|-----------|------|
+| `epochs` | 200 | 100-500 | 훈련 에폭 수 |
+| `batch_size` | 32 | 16-64 | 배치 크기 |
+| `learning_rate` | 1e-4 | 5e-5 ~ 3e-4 | 학습률 |
+| `guidance_scale` | 7.5 | 3.0-15.0 | CFG 스케일 |
+| `cfg_probability` | 0.1 | 0.05-0.2 | CFG 드롭아웃 확률 |
+| `ema_decay` | 0.9999 | 0.999-0.9999 | EMA 감쇠율 |
 
-### Training Configuration
+### 모델 크기
 
-| Parameter | Default | Range | Description |
-|-----------|---------|-------|-------------|
-| `--epochs` | 100 | 50-500 | Number of training epochs |
-| `--batch-size` | 64 | 8-128 | Batch size per GPU |
-| `--learning-rate` | 5e-4 | 1e-5 to 1e-3 | Peak learning rate |
-| `--warmup-steps` | 100 | 50-1000 | LR warmup steps |
-| `--gradient-clip-val` | 1.0 | 0.5-2.0 | Gradient clipping threshold |
-| `--weight-decay` | 0.01 | 0-0.1 | AdamW weight decay |
+| Size | Layers | Hidden | Heads | Params | VRAM |
+|------|--------|--------|-------|--------|------|
+| **S** | 12 | 384 | 6 | ~40M | ~4GB |
+| B | 12 | 768 | 12 | ~160M | ~8GB |
+| L | 24 | 1024 | 16 | ~560M | ~16GB |
+| XL | 28 | 1152 | 16 | ~820M | ~24GB |
 
-### Diffusion Configuration
-
-| Parameter | Default | Options | Description |
-|-----------|---------|---------|-------------|
-| `--num-timesteps` | 1000 | 500-1000 | Diffusion timesteps |
-| `--beta-schedule` | cosine | linear, cosine | Noise schedule |
-| `--guidance-scale` | 7.5 | 1.0-15.0 | CFG guidance scale |
-| `--cfg-probability` | 0.1 | 0.05-0.2 | Unconditional dropout rate |
-
-### EMA Configuration
-
-| Parameter | Default | Range | Description |
-|-----------|---------|-------|-------------|
-| `--use-ema` | True | - | Enable EMA for stable weights |
-| `--ema-decay` | 0.9999 | 0.995-0.9999 | EMA decay rate |
-
-### Validation Configuration
-
-| Parameter | Default | Range | Description |
-|-----------|---------|-------|-------------|
-| `--validation-interval` | 5 | 1-20 | Generate samples every N epochs |
-
-### Mixed Precision Training
-
-| Parameter | Default | Options | Description |
-|-----------|---------|---------|-------------|
-| `--mixed-precision` | False | - | Enable AMP training |
-| `--amp-dtype` | float16 | float16, bfloat16 | AMP precision type |
-
-## Training Configurations
-
-### Recommended Configurations
-
-#### Small Model (DiT-S) - Quick Experiments
-
-```bash
-./scripts/train.sh \
-    --model-size S \
-    --epochs 100 \
-    --batch-size 64 \
-    --learning-rate 5e-4 \
-    --mixed-precision \
-    --amp-dtype float16
-```
-
-**Best for:**
-- Initial experiments and prototyping
-- Limited GPU memory (< 16GB)
-- Fast iteration cycles
-
-**Expected performance:**
-- Training time: ~2-3 hours (RTX 3090)
-- Quality: Good for 32×32 pixel art
-- Convergence: ~50-80 epochs
-
-#### Medium Model (DiT-B) - Production Quality
-
-```bash
-./scripts/train.sh \
-    --model-size B \
-    --epochs 200 \
-    --batch-size 32 \
-    --learning-rate 3e-4 \
-    --warmup-steps 500 \
-    --mixed-precision \
-    --amp-dtype float16 \
-    --wandb
-```
-
-**Best for:**
-- Production deployments
-- High-quality outputs
-- GPU memory: 24-32GB
-
-**Expected performance:**
-- Training time: ~8-10 hours (RTX 3090)
-- Quality: Excellent detail and prompt adherence
-- Convergence: ~100-150 epochs
-
-#### Large Model (DiT-L) - Maximum Quality
-
-```bash
-./scripts/train.sh \
-    --model-size L \
-    --epochs 300 \
-    --batch-size 16 \
-    --learning-rate 2e-4 \
-    --warmup-steps 1000 \
-    --mixed-precision \
-    --amp-dtype bfloat16 \
-    --wandb
-```
-
-**Best for:**
-- Research and highest quality outputs
-- Multi-GPU setups (A100 40GB+)
-- Requires: 64GB+ VRAM
-
-**Expected performance:**
-- Training time: ~24-36 hours (A100)
-- Quality: State-of-the-art
-- Convergence: ~150-250 epochs
-
-### Fine-tuning Configuration
-
-Fine-tune a pre-trained model on custom data:
-
-```bash
-./scripts/train.sh \
-    --resume checkpoints/model_best.pt \
-    --epochs 50 \
-    --batch-size 32 \
-    --learning-rate 1e-4 \
-    --warmup-steps 100 \
-    --dataset-name your-username/custom-emoji-dataset
-```
-
-**Tips for fine-tuning:**
-- Use 1/5 to 1/10 of original learning rate
-- Shorter warmup period
-- Monitor for overfitting on small datasets
-- Consider using EMA weights from checkpoint
+---
 
 ## Hardware Requirements
 
-### GPU Memory Requirements
+### GPU 메모리
 
-| Model Size | Batch Size | Mixed Precision | VRAM Required |
-|------------|------------|-----------------|---------------|
-| DiT-S | 64 | No | ~24GB |
-| DiT-S | 64 | Yes (FP16) | ~12GB |
-| DiT-S | 32 | Yes (FP16) | ~8GB |
-| DiT-B | 32 | No | ~40GB |
-| DiT-B | 32 | Yes (FP16) | ~20GB |
-| DiT-B | 16 | Yes (FP16) | ~12GB |
-| DiT-L | 16 | Yes (BF16) | ~40GB |
-| DiT-L | 8 | Yes (BF16) | ~24GB |
+| 단계 | Model Size | Batch Size | VRAM |
+|------|------------|------------|------|
+| VAE | - | 32 | ~4GB |
+| VAE | - | 128 | ~8GB |
+| Diffusion | S | 32 | ~6GB |
+| Diffusion | B | 32 | ~12GB |
+| Diffusion | L | 16 | ~20GB |
 
-### CPU Requirements
+### 권장 사양
 
-- **Minimum**: 8 cores, 16GB RAM
-- **Recommended**: 16+ cores, 32GB+ RAM
-- DataLoader workers: 4-8 workers per GPU
+**최소:**
+- GPU: RTX 3060 12GB 이상
+- RAM: 16GB
+- Storage: 20GB SSD
 
-### Storage Requirements
+**권장:**
+- GPU: RTX 3090 24GB 이상
+- RAM: 32GB
+- Storage: 50GB SSD
 
-- **Dataset**: ~2GB (junyeong-nero/emoji-32)
-- **Checkpoints**: ~500MB per checkpoint (DiT-S)
-- **Validation samples**: ~100MB per epoch
-- **Total recommended**: 50GB+ free space
+### Apple Silicon (MPS)
 
-## Best Practices
+```bash
+# MPS 자동 감지
+uv run main.py --train-vae --batch-size 32
 
-### Learning Rate Scheduling
-
-The default training uses cosine annealing with linear warmup:
-
-```python
-# Warmup phase (0 to warmup_steps)
-lr = lr_max * (step / warmup_steps)
-
-# Cosine decay phase (warmup_steps to total_steps)
-lr = 0.5 * lr_max * (1 + cos(π * progress))
+# 또는 config.yaml에서 설정
+# device: mps
 ```
 
-**Recommendations:**
-- Start with `lr=5e-4` for DiT-S
-- Reduce by 2x for each model size increase
-- Warmup: 100 steps for small datasets (< 5k samples)
-- Warmup: 500-1000 steps for large datasets (> 10k samples)
-
-### Batch Size Selection
-
-**Rule of thumb:**
-```
-effective_batch_size = batch_size × num_gpus × gradient_accumulation
-```
-
-**Recommendations:**
-- Target effective batch size: 128-256
-- Larger batches → more stable gradients
-- Smaller batches → better generalization
-- Adjust learning rate with batch size: `lr_new = lr_base × sqrt(bs_new / bs_base)`
-
-### EMA Configuration
-
-**EMA formula:**
-```
-θ_ema = decay × θ_ema + (1 - decay) × θ
-```
-
-**Decay recommendations:**
-- Small datasets (< 5k): 0.999
-- Medium datasets (5k-20k): 0.9995
-- Large datasets (> 20k): 0.9999
-
-**When to use EMA:**
-- ✅ Always enable for production models
-- ✅ Smoother convergence and better final quality
-- ✅ Negligible computational overhead
-- ❌ Disable only for quick experiments
-
-### Monitoring Training
-
-**Key metrics to watch:**
-
-1. **Training loss**: Should decrease smoothly
-   - Typical final loss: 0.01-0.05
-   - Spiky loss → reduce learning rate or increase batch size
-
-2. **Learning rate**: Check warmup and decay
-   - Use `--wandb` to visualize LR schedule
-
-3. **Validation samples**: Visual quality check
-   - Generated every `--validation-interval` epochs
-   - Compare regular model vs EMA model
-   - Look for: detail, prompt adherence, artifacts
-
-4. **Gradient norms**: Should stay bounded
-   - Enable gradient clipping if exploding
-   - Typical range: 0.1-2.0
-
-### Early Stopping
-
-While not implemented by default, monitor these signals:
-
-**Stop training if:**
-- Validation quality plateaus for 20+ epochs
-- Training loss < 0.01 and quality is acceptable
-- Overfitting detected (validation samples degrade)
-
-**Continue training if:**
-- Validation samples still improving
-- Loss still decreasing
-- Want higher prompt adherence (train longer with CFG)
+---
 
 ## Troubleshooting
 
-### Out of Memory (OOM)
-
-**Solutions:**
-1. Enable mixed precision: `--mixed-precision`
-2. Reduce batch size: `--batch-size 32` → `--batch-size 16`
-3. Use smaller model: `--model-size B` → `--model-size S`
-4. Reduce image size (if using > 32): `--image-size 32`
-
-### Loss Not Decreasing
-
-**Checklist:**
-- [ ] Check learning rate (try reducing by 2-5x)
-- [ ] Increase warmup steps
-- [ ] Verify dataset is loading correctly
-- [ ] Check for NaN gradients (reduce LR)
-- [ ] Try different beta schedule: `--beta-schedule linear`
-
-### Poor Generation Quality
-
-**Potential causes:**
-
-1. **Undertraining**
-   - Solution: Train longer (100+ epochs)
-
-2. **Low guidance scale**
-   - Solution: Use `--guidance-scale 7.5` or higher at inference
-
-3. **High CFG dropout**
-   - Solution: Reduce `--cfg-probability` to 0.05-0.1
-
-4. **Wrong EMA weights**
-   - Solution: Use EMA checkpoint for inference
-
-### Slow Training
-
-**Optimizations:**
-
-1. **Enable mixed precision**
-   ```bash
-   --mixed-precision --amp-dtype float16
-   ```
-
-2. **Increase DataLoader workers**
-   ```bash
-   --num-workers 8
-   ```
-
-3. **Enable pin memory**
-   ```bash
-   --pin-memory
-   ```
-
-4. **Use faster data format**
-   - Pre-process dataset to tensors
-   - Use local SSD instead of network storage
-
-5. **Reduce validation frequency**
-   ```bash
-   --validation-interval 10
-   ```
-
-### Gradient Explosion
-
-**Symptoms:**
-- Loss suddenly spikes to NaN
-- Gradients > 100
-
-**Solutions:**
-1. Enable gradient clipping: `--gradient-clip-val 1.0`
-2. Reduce learning rate by 5-10x
-3. Increase warmup steps
-4. Check for data issues (corrupted images)
-
-## Advanced Topics
-
-### Multi-GPU Training
-
-(Coming soon - DDP support planned)
+### CUDA Out of Memory
 
 ```bash
-# Future support
-torchrun --nproc_per_node=4 src/training/train.py \
-    --batch-size 32 \
-    --model-size B
+# 해결책 1: 배치 크기 줄이기
+--batch-size 16
+
+# 해결책 2: Mixed precision 활성화
+# config.yaml에서
+mixed_precision: true
+
+# 해결책 3: 모델 크기 줄이기
+model_size: S
 ```
 
-### Gradient Checkpointing
+### Loss가 감소하지 않음
 
-(Coming soon - memory optimization planned)
+1. **학습률 확인**: 너무 높으면 불안정, 너무 낮으면 느림
+2. **KL weight 확인**: VAE에서 1e-6 권장
+3. **데이터셋 확인**: 이미지가 제대로 로딩되는지
 
-Reduces memory usage by ~40% at the cost of ~20% slower training.
-
-### Custom Datasets
-
-Use your own dataset:
+### NaN Loss 발생
 
 ```bash
-./scripts/train.sh \
-    --data-source huggingface \
-    --dataset-name your-username/your-dataset \
-    --split train
+# 해결책: 학습률 낮추기
+--learning-rate 5e-5
+
+# 또는 gradient clipping 추가 (코드 수정 필요)
 ```
 
-**Dataset requirements:**
-- Images: 32×32 RGB
-- Format: Hugging Face dataset with 'image' and 'caption' columns
-- Minimum samples: 1000+ for decent quality
+### 생성 품질이 낮음
 
-## Performance Benchmarks
+1. **더 많은 에폭** 훈련
+2. **Guidance scale** 조정: 7.5-10.0
+3. **Steps** 늘리기: 50-100
+4. **EMA weights** 사용 확인
 
-### Training Speed (DiT-S, Batch Size 64, FP16)
-
-| GPU | Throughput (imgs/sec) | Epoch Time | 100 Epoch Total |
-|-----|----------------------|------------|-----------------|
-| RTX 3090 | ~250 | ~1.5 min | ~2.5 hours |
-| RTX 4090 | ~400 | ~1 min | ~1.7 hours |
-| A100 40GB | ~600 | ~40 sec | ~1.1 hours |
-| H100 | ~1000 | ~25 sec | ~0.7 hours |
-
-*Assumes ~4000 sample dataset*
-
-### Quality vs Training Time
-
-| Epochs | Training Time (RTX 3090) | Quality Level |
-|--------|-------------------------|---------------|
-| 20 | ~30 min | Basic shapes, poor details |
-| 50 | ~1.25 hours | Recognizable objects |
-| 100 | ~2.5 hours | Good quality, good prompt adherence |
-| 200 | ~5 hours | Excellent quality |
-| 300+ | ~7.5+ hours | Diminishing returns |
-
-## Reproducibility
-
-### Seeding
-
-All random operations are seeded:
+### CLIP 설치 오류
 
 ```bash
-./scripts/train.sh --seed 42
+# OpenAI CLIP 설치
+pip install git+https://github.com/openai/CLIP.git
 ```
 
-This ensures:
-- Same weight initialization
-- Same data shuffling
-- Same sampling order
-- Reproducible validation samples
+---
 
-**Note:** Minor variations may occur across different hardware/drivers.
+## Best Practices
 
-### Saving Training State
+### 1. 점진적 훈련
 
-Checkpoints include:
-- Model weights
-- Optimizer state
-- Scheduler state
-- EMA state
-- Training epoch
-- Random state (planned)
-
-Resume training:
 ```bash
-./scripts/train.sh --resume checkpoints/checkpoint_epoch_50.pt
+# Step 1: 작은 데이터셋으로 테스트
+uv run main.py --train-vae --epochs 10 --dataset reach-vb/pokemon-blip-captions
+
+# Step 2: 큰 데이터셋으로 본 훈련
+uv run main.py --train-vae --epochs 100 --dataset hmu013/LAION-300k
 ```
 
-## References
+### 2. 체크포인트 관리
 
+```bash
+# 훈련 중 자동 저장: best loss 기준
+# 위치: checkpoints/vae.pt, checkpoints/diffusion.pt
+
+# HuggingFace Hub에 백업
+--push-to-hub --hub-model-id username/model-name
+```
+
+### 3. 모니터링
+
+```bash
+# Wandb로 훈련 모니터링
+--wandb --wandb-project tiny-stable-diffusion
+
+# 샘플 확인
+# samples/vae_epoch_N/: VAE reconstruction
+# samples/epoch_N/: Diffusion generation
+```
+
+### 4. 재현성
+
+```bash
+# 시드 고정
+# config.yaml에서
+seed: 42
+
+# 또는 generation 시
+--seed 42
+```
+
+---
+
+## 추가 문서
+
+- [Architecture Deep Dive](./architecture.md) - 모델 아키텍처 상세
+- [Training Pipeline Deep Dive](./training-pipeline.md) - 훈련 과정 상세
+- [Inference Deep Dive](./inference.md) - 이미지 생성 상세
+
+---
+
+## 참고 자료
+
+- [Stable Diffusion 3 Paper](https://arxiv.org/abs/2403.03206)
 - [DiT Paper](https://arxiv.org/abs/2212.09748)
 - [DDPM Paper](https://arxiv.org/abs/2006.11239)
-- [DDIM Paper](https://arxiv.org/abs/2010.02502)
-- [Classifier-Free Guidance](https://arxiv.org/abs/2207.12598)
+- [VAE Paper](https://arxiv.org/abs/1312.6114)
