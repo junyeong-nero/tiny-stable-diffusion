@@ -9,7 +9,24 @@ model_type: mmdit
 
 # Pretraining Settings (Stage 1)
 pretrain:
-    data_source: cifar100
+    # Data source options:
+    # - "caption": General image-caption dataset (Flickr8k, CC3M, Pokemon BLIP)
+    # - "cifar100": CIFAR-100 (not recommended for text-to-image)
+    data_source: caption
+
+    # Caption dataset settings (used when data_source="caption")
+    # Recommended options:
+    # - "ariG23498/flickr8k": 8K images, high-quality captions (FAST, recommended for testing)
+    # - "reach-vb/pokemon-blip-captions": 833 Pokemon images, pixel-art style
+    # - "pixparse/cc3m-wds": 3.3M images (large, for serious pretraining)
+    # - "google-research-datasets/conceptual_captions": CC3M alternative
+    dataset_name: ariG23498/flickr8k
+    image_field: image
+    caption_field: caption
+    streaming: false
+    split: train
+
+    # Training hyperparameters
     epochs: 200
     batch_size: 32
     learning_rate: 1.0e-4
@@ -17,7 +34,7 @@ pretrain:
     initial_cfg_prob: 0.0
     final_cfg_prob: 0.1
     cfg_warmup_epochs: 1
-    checkpoint_path: checkpoints/pretrain_cifar100.pt
+    checkpoint_path: checkpoints/pretrain_flickr8k.pt
 
 # Fine-tuning Settings (Stage 2)
 finetune:

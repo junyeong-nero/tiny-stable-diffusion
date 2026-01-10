@@ -16,7 +16,7 @@ text-to-emoji is a multi-modal generative AI model that transforms natural langu
 - **Diffusion Transformer (DiT)**: Modern transformer-based architecture with AdaLN-Zero conditioning
 - **Fast Sampling**: DDIM (Denoising Diffusion Implicit Models) for rapid generation
 - **Classifier-Free Guidance (CFG)**: Enhanced prompt adherence for more accurate results
-- **Two-Stage Training**: Pretrain on CIFAR-100, fine-tune on emoji data
+- **Two-Stage Training**: Pretrain on image-caption datasets (Flickr8k/CC3M), fine-tune on emoji data
 
 ## 🧠 Model Architecture
 
@@ -107,11 +107,29 @@ Supports multiple datasets for flexible training:
 - **Size**: ~1,900 emoji images
 - **Resolution**: 32×32 RGB
 
-### 2. CIFAR-100 (Pretraining)
-- **Source**: torchvision.datasets.CIFAR100
-- **Size**: 60,000 images
-- **Classes**: 100 (or 20 coarse categories)
-- **Use Case**: Quick pretraining, general visual concepts
+### 2. Pretrain Datasets (Text-to-Image)
+
+**Recommended Datasets** (all have image-caption pairs):
+
+| Dataset | Images | Captions | Best For | HuggingFace |
+|---------|--------|----------|----------|-------------|
+| **Flickr8k** ⭐ | 8K | Human-written, 5/image | Fast pretrain, testing | `ariG23498/flickr8k` |
+| **Pokemon BLIP** 🎮 | 833 | BLIP-generated | Pixel art style, small | `reach-vb/pokemon-blip-captions` |
+| **CC3M** 🌐 | 3.3M | Web alt-text | Large-scale pretrain | `pixparse/cc3m-wds` |
+| **CC12M** 🌍 | 12M | Web alt-text | Production-scale | `laion/conceptual-captions-12m-webdataset` |
+
+**Not Recommended**:
+- **CIFAR-100**: Image classification dataset (no captions) - poor for text-to-image learning
+
+**Configuration** (in `config.yaml`):
+```yaml
+pretrain:
+    data_source: caption
+    dataset_name: ariG23498/flickr8k  # or other options above
+    image_field: image
+    caption_field: caption
+    streaming: false
+```
 
 ## 🚀 Quick Start
 
@@ -127,28 +145,30 @@ uv sync
 
 ### Two-Stage Training (Recommended)
 
-**Stage 1: Pretrain** (CIFAR-100)
+**Stage 1: Pretrain** (Text-to-Image Dataset)
 ```bash
-# CIFAR-100 (60K images) - default dataset
-uv run main.py --pretrain --epochs 100 --batch-size 64
+# Default: Flickr8k (8K images with captions)
+uv run main.py --pretrain --epochs 100 --batch-size 32
 
-# With custom dataset (local path or HuggingFace)
-uv run main.py --pretrain --dataset /path/to/dataset
-uv run main.py --pretrain --dataset user/dataset-name
+# With Pokemon BLIP (pixel art style)
+uv run main.py --pretrain --dataset reach-vb/pokemon-blip-captions
+
+# With CC3M (large-scale, requires more time/resources)
+uv run main.py --pretrain --dataset pixparse/cc3m-wds --epochs 50
 ```
 
 **Stage 2: Fine-tune on Emoji**
 ```bash
 # Default emoji dataset with pretrained checkpoint
 uv run main.py --finetune \
-    --checkpoint checkpoints/pretrain_cifar100.pt \
+    --checkpoint checkpoints/pretrain_flickr8k.pt \
     --epochs 100 \
     --batch-size 16
 
 # With custom dataset
 uv run main.py --finetune \
     --dataset user/my-emoji-dataset \
-    --checkpoint checkpoints/pretrain_cifar100.pt
+    --checkpoint checkpoints/pretrain_flickr8k.pt
 ```
 
 ### Interactive Demo
@@ -165,37 +185,42 @@ Enter prompts to generate images interactively. Type 'quit' to exit.
 
 For best results with limited emoji data, use the two-stage approach:
 
-**Stage 1: Pretraining** (CIFAR-100)
+**Stage 1: Pretraining** (Image-Caption Dataset)
 
 ```bash
-# Default: CIFAR-100 with recommended settings
-uv run main.py --pretrain --epochs 100 --batch-size 64
+# Default: Flickr8k (recommended for initial testing)
+uv run main.py --pretrain --epochs 100 --batch-size 32
 
-# Override hyperparameters
+# Pokemon BLIP (pixel art style, very fast)
 uv run main.py --pretrain \
-    --epochs 50 \
-    --batch-size 64 \
-    --learning-rate 1e-4
+    --dataset reach-vb/pokemon-blip-captions \
+    --epochs 200 \
+    --batch-size 16
 
-# Use custom dataset
-uv run main.py --pretrain --dataset /path/to/images
+# CC3M (large-scale, requires more resources)
+uv run main.py --pretrain \
+    --dataset pixparse/cc3m-wds \
+    --epochs 50 \
+    --batch-size 64
 ```
 
-| Dataset | Images | Best For |
-| :--- | :---: | :--- |
-| **CIFAR-100** ⭐ | 60,000 | Quick experiments, limited storage |
+| Dataset | Images | Captions | Best For |
+| :--- | :---: | :---: | :--- |
+| **Flickr8k** ⭐ | 8K | Human-written | Fast testing, quality captions |
+| **Pokemon BLIP** 🎮 | 833 | BLIP | Pixel art style, very fast |
+| **CC3M** 🌐 | 3.3M | Web | Large-scale pretrain |
 
 **Stage 2: Fine-tuning**
 ```bash
 # Default: Emoji-32 dataset with pretrained checkpoint
 uv run main.py --finetune \
-    --checkpoint checkpoints/pretrain_cifar100.pt \
+    --checkpoint checkpoints/pretrain_flickr8k.pt \
     --epochs 100 \
     --batch-size 16
 
 # Override hyperparameters
 uv run main.py --finetune \
-    --checkpoint checkpoints/pretrain_cifar100.pt \
+    --checkpoint checkpoints/pretrain_flickr8k.pt \
     --epochs 200 \
     --batch-size 16 \
     --learning-rate 1e-5
@@ -203,7 +228,7 @@ uv run main.py --finetune \
 # Use custom dataset
 uv run main.py --finetune \
     --dataset user/my-emoji-dataset \
-    --checkpoint checkpoints/pretrain_cifar100.pt
+    --checkpoint checkpoints/pretrain_flickr8k.pt
 ```
 
 ### Training Arguments

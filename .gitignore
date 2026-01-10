@@ -1,15 +1,25 @@
-# Claude AI configuration
 .claude/
 .ruff_cache/
 wandb/
-# Claude AI configuration
-
 
 # Model checkpoints
 checkpoints/
 
 # Data directory (downloaded datasets) - ignore contents but not src/ subdirectory
 data/*
+
+# HuggingFace cache directories
+.cache/
+~/.cache/text-to-emoji/
+~/.cache/huggingface/
+~/.cache/pixmoji/
+
+# Generated images and samples
+assets/
+samples/
+output*.png
+*.png
+!docs/**/*.png
 
 # Python-generated files
 __pycache__/
@@ -21,3 +31,8 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Temporary files
+*.tmp
+*.log
+/tmp/

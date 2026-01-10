@@ -6,7 +6,7 @@ from typing import Any
 
 from torch.utils.data import DataLoader, Dataset
 
-from src.data.dataset import CIFAR100Dataset, EmojiDataset
+from src.data.dataset import CIFAR100Dataset, CaptionDataset, EmojiDataset
 
 
 def get_dataset(config: dict[str, Any]) -> Dataset:
@@ -32,6 +32,25 @@ def get_dataset(config: dict[str, Any]) -> Dataset:
         dataset_name = config.get("dataset_name", "junyeong-nero/emoji-32")
         print(f"Loading Hugging Face dataset: {dataset_name}")
         return EmojiDataset(dataset_name=dataset_name, split="train")
+
+    elif data_source == "caption":
+        # General image-caption dataset (Flickr8k, CC3M, Pokemon BLIP, etc.)
+        dataset_name = config.get("dataset_name", "ariG23498/flickr8k")
+        image_field = config.get("image_field", "image")
+        caption_field = config.get("caption_field", "caption")
+        target_size = config.get("image_size", 32)
+        streaming = config.get("streaming", False)
+        split = config.get("split", "train")
+
+        print(f"Loading caption dataset: {dataset_name}")
+        return CaptionDataset(
+            dataset_name=dataset_name,
+            split=split,
+            image_field=image_field,
+            caption_field=caption_field,
+            target_size=target_size,
+            streaming=streaming,
+        )
 
     elif data_source == "cifar100":
         use_coarse = config.get("use_coarse_labels", False)

@@ -24,7 +24,7 @@ from PIL import Image
 import numpy as np
 
 from src.models.diffusion import Diffusion
-from src.models.dit import DiT
+from src.models import DiT
 from src.text_encoder.clip_encoder import CLIPTextEncoder
 from src.config import DiffusionConfig, ModelConfig
 
@@ -58,8 +58,11 @@ def load_model(
     model_size = model_config.get("model_size", "S")
     patch_size = model_config.get("patch_size", 2)
     image_size = model_config.get("image_size", 32)
+    model_type = model_config.get("model_type", "dit")
+    qk_rmsnorm = model_config.get("qk_rmsnorm", True)
+    register_tokens = model_config.get("register_tokens", 0)
 
-    print(f"Model: DiT-{model_size}, patch_size={patch_size}, image_size={image_size}")
+    print(f"Model: {model_type.upper()}-{model_size}, patch_size={patch_size}, image_size={image_size}")
 
     # Load CLIP encoder
     print("Loading CLIP text encoder...")
@@ -74,6 +77,9 @@ def load_model(
         patch_size=patch_size,
         model_size=model_size,
         clip_embed_dim=clip_encoder.embedding_dim,
+        model_type=model_type,
+        qk_rmsnorm=qk_rmsnorm,
+        register_tokens=register_tokens,
     )
 
     # Load weights (try EMA first, then regular)

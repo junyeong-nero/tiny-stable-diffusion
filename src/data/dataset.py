@@ -3,8 +3,10 @@
 Supports multiple datasets:
 - junyeong-nero/emoji-32: Custom emoji dataset (32x32)
 - CIFAR-100: General image classification dataset (32x32)
+- Flickr8k, CC3M, Pokemon BLIP: General image-caption datasets
+- Any HuggingFace dataset with image and text/caption fields
 
-Images are already 32x32 RGB, no resizing needed for both.
+Images are automatically resized to 32x32 for consistency.
 """
 
 from __future__ import annotations
@@ -380,6 +382,153 @@ class CIFAR100Dataset(Dataset):
     def __repr__(self) -> str:
         label_type = "coarse" if self.use_coarse_labels else "fine"
         return f"CIFAR100Dataset(train={self.train}, labels={label_type}, num_samples={len(self)})"
+
+
+class CaptionDataset(Dataset):
+    """General-purpose dataset for image-caption pairs from HuggingFace.
+
+    Supports various datasets like Flickr8k, CC3M, Pokemon BLIP, etc.
+    Automatically handles different field names and resizes images to target size.
+
+    Args:
+        dataset_name: HuggingFace dataset name (e.g., "ariG23498/flickr8k")
+        split: Dataset split ("train", "validation", "test")
+        cache_dir: Cache directory for downloaded datasets
+        transform: Optional custom transform (default: ToTensor + Normalize)
+        image_field: Name of the image field in the dataset
+        caption_field: Name of the caption field in the dataset
+        target_size: Target image size (default: 32)
+        streaming: Use streaming mode for large datasets
+
+    Example datasets:
+        - ariG23498/flickr8k: image="image", caption="caption"
+        - reach-vb/pokemon-blip-captions: image="image", caption="text"
+        - pixparse/cc3m-wds: varies by format
+    """
+
+    def __init__(
+        self,
+        dataset_name: str,
+        split: str = "train",
+        cache_dir: str = "~/.cache/text-to-emoji",
+        transform: Callable | None = None,
+        image_field: str = "image",
+        caption_field: str = "caption",
+        target_size: int = 32,
+        streaming: bool = False,
+    ) -> None:
+        super().__init__()
+        self.dataset_name = dataset_name
+        self.split = split
+        self.cache_dir = Path(cache_dir).expanduser()
+        self.image_field = image_field
+        self.caption_field = caption_field
+        self.target_size = target_size
+        self.streaming = streaming
+        self._buffer = []
+
+        try:
+            from datasets import load_dataset
+
+            print(f"Loading dataset: {dataset_name} (split={split})")
+
+            if streaming:
+                self.dataset_split = load_dataset(
+                    dataset_name,
+                    split=split,
+                    streaming=True,
+                )
+                self.size = getattr(self.dataset_split, "num_rows", None) or 100000
+            else:
+                self.dataset = load_dataset(
+                    dataset_name,
+                    split=split,
+                    cache_dir=str(self.cache_dir),
+                )
+                self.dataset_split = self.dataset
+                self.size = len(self.dataset_split)
+
+            print(f"✓ Loaded {self.dataset_name}: {self.size} samples")
+
+        except ImportError:
+            raise ImportError("datasets library not found. Install with: pip install datasets")
+        except Exception as e:
+            raise RuntimeError(f"Failed to load dataset {dataset_name}: {e}")
+
+        if transform is None:
+            self.transform = transforms.Compose(
+                [
+                    transforms.Resize((target_size, target_size), interpolation=transforms.InterpolationMode.BICUBIC),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+                ]
+            )
+        else:
+            self.transform = transform
+
+    def __len__(self) -> int:
+        return self.size
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor | str]:
+        if self.streaming:
+            while len(self._buffer) <= idx:
+                try:
+                    sample = next(iter(self.dataset_split))
+                    self._buffer.append(sample)
+                except StopIteration:
+                    break
+            if idx >= len(self._buffer):
+                raise IndexError(f"Index {idx} out of range")
+            sample = self._buffer[idx]
+        else:
+            sample = self.dataset_split[idx]
+
+        # Get image
+        image = sample.get(self.image_field)
+        if image is None:
+            raise ValueError(f"Image field '{self.image_field}' not found in sample")
+
+        if not isinstance(image, Image.Image):
+            image = Image.fromarray(image)
+
+        # Convert to RGB
+        if image.mode == "RGBA":
+            background = Image.new("RGB", image.size, (255, 255, 255))
+            background.paste(image, mask=image.split()[3])
+            image = background
+        elif image.mode != "RGB":
+            image = image.convert("RGB")
+
+        # Get caption (try multiple field names)
+        caption = None
+        for field in [self.caption_field, "text", "caption", "captions"]:
+            caption = sample.get(field)
+            if caption is not None:
+                break
+
+        if caption is None:
+            caption = f"image_{idx}"
+
+        # Handle multiple captions (e.g., Flickr8k has 5 captions per image)
+        if isinstance(caption, list):
+            caption = caption[0]  # Use first caption
+
+        if self.transform:
+            image = self.transform(image)
+
+        return {
+            "image": image,
+            "caption": str(caption),
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"CaptionDataset("
+            f"dataset={self.dataset_name}, "
+            f"split={self.split}, "
+            f"size={self.target_size}x{self.target_size}, "
+            f"num_samples={self.size})"
+        )
 
 
 class LocalEmojiDataset(Dataset):
