@@ -11,13 +11,18 @@ model_type: mmdit
 # Stage 1: VAE Training
 # =============================================================================
 vae_train:
-    # Data source: "caption" for image-caption datasets
-    data_source: caption
-    dataset_name: jxie/flickr8k
-    image_field: image
+    # Data source: "streaming_caption" for large URL-based datasets
+    data_source: streaming_caption
+    dataset_name: dalle-mini/open-images
+    image_field: url  # This dataset uses URL field for images
     caption_field: caption
-    streaming: false
     split: train
+
+    # Streaming settings for large datasets
+    buffer_size: 1000  # Shuffle buffer size
+    skip_failures: true  # Skip failed URL downloads
+    url_timeout: 10  # Timeout for URL requests (seconds)
+    max_retries: 3  # Max retries for failed requests
 
     # Image settings
     image_size: 64  # Input image size
@@ -40,13 +45,18 @@ vae_train:
 # Stage 2: Diffusion Training (on latent space)
 # =============================================================================
 diffusion_train:
-    # Data source
-    data_source: caption
-    dataset_name: jxie/flickr8k
-    image_field: image
-    caption_field: caption
-    streaming: false
+    # Data source: "streaming_caption" for large datasets
+    data_source: streaming_caption
+    dataset_name: hmu013/LAION-300k
+    image_field: png  # This dataset uses png field for images
+    caption_field: json  # Caption is nested in json: {"caption": "..."}
     split: train
+
+    # Streaming settings for large datasets
+    buffer_size: 1000  # Shuffle buffer size
+    skip_failures: true  # Skip failed samples
+    url_timeout: 10  # Timeout for URL requests (seconds)
+    max_retries: 3  # Max retries for failed requests
 
     # Image and latent settings
     image_size: 64  # Original image size

@@ -11,13 +11,15 @@ Images are automatically resized to 32x32 for consistency.
 
 from __future__ import annotations
 
+import io
 import random
 from pathlib import Path
 from typing import Callable
 
+import requests
 import torch
 from PIL import Image
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, IterableDataset
 from torchvision import transforms
 from torchvision.datasets import CIFAR100
 
@@ -390,6 +392,7 @@ class CaptionDataset(Dataset):
 
     Supports various datasets like Flickr8k, CC3M, Pokemon BLIP, etc.
     Automatically handles different field names and resizes images to target size.
+    Supports loading images from URLs.
 
     Args:
         dataset_name: HuggingFace dataset name (e.g., "ariG23498/flickr8k")
@@ -400,11 +403,13 @@ class CaptionDataset(Dataset):
         caption_field: Name of the caption field in the dataset
         target_size: Target image size (default: 32)
         streaming: Use streaming mode for large datasets
+        url_timeout: Timeout for URL requests in seconds (default: 10)
+        max_retries: Maximum retries for failed URL requests (default: 3)
 
     Example datasets:
         - ariG23498/flickr8k: image="image", caption="caption"
         - reach-vb/pokemon-blip-captions: image="image", caption="text"
-        - pixparse/cc3m-wds: varies by format
+        - dalle-mini/open-images: image="url", caption="caption"
     """
 
     def __init__(
@@ -417,6 +422,8 @@ class CaptionDataset(Dataset):
         caption_field: str = "caption",
         target_size: int = 32,
         streaming: bool = False,
+        url_timeout: int = 10,
+        max_retries: int = 3,
     ) -> None:
         super().__init__()
         self.dataset_name = dataset_name
@@ -426,12 +433,14 @@ class CaptionDataset(Dataset):
         self.caption_field = caption_field
         self.target_size = target_size
         self.streaming = streaming
+        self.url_timeout = url_timeout
+        self.max_retries = max_retries
         self._buffer = []
 
         try:
             from datasets import load_dataset
 
-            print(f"Loading dataset: {dataset_name} (split={split})")
+            print(f"Loading dataset: {dataset_name} (split={split}, streaming={streaming})")
 
             if streaming:
                 self.dataset_split = load_dataset(
@@ -470,6 +479,122 @@ class CaptionDataset(Dataset):
         else:
             self.transform = transform
 
+    def _load_image_from_url(self, url: str) -> Image.Image:
+        """Load image from URL with retry logic.
+
+        Args:
+            url: Image URL
+
+        Returns:
+            PIL Image
+
+        Raises:
+            RuntimeError: If image cannot be loaded after max retries
+        """
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                response = requests.get(
+                    url,
+                    timeout=self.url_timeout,
+                    headers={"User-Agent": "tiny-stable-diffusion/1.0"},
+                )
+                response.raise_for_status()
+                image = Image.open(io.BytesIO(response.content))
+                return image
+            except requests.exceptions.Timeout:
+                last_error = f"Timeout after {self.url_timeout}s"
+            except requests.exceptions.HTTPError as e:
+                last_error = f"HTTP error: {e.response.status_code}"
+                if e.response.status_code == 404:
+                    break  # Don't retry on 404
+            except requests.exceptions.RequestException as e:
+                last_error = f"Request error: {e}"
+            except Exception as e:
+                last_error = f"Failed to open image: {e}"
+
+        raise RuntimeError(f"Failed to load image from {url}: {last_error}")
+
+    def _load_image(self, image_data) -> Image.Image:
+        """Load image from various sources (URL, PIL Image, numpy array, bytes).
+
+        Args:
+            image_data: Image data (URL string, PIL Image, numpy array, or bytes)
+
+        Returns:
+            PIL Image in RGB format
+        """
+        # Handle URL strings
+        if isinstance(image_data, str):
+            if image_data.startswith(("http://", "https://")):
+                image = self._load_image_from_url(image_data)
+            else:
+                # Assume it's a file path
+                image = Image.open(image_data)
+        # Handle bytes
+        elif isinstance(image_data, bytes):
+            image = Image.open(io.BytesIO(image_data))
+        # Handle PIL Image
+        elif isinstance(image_data, Image.Image):
+            image = image_data
+        # Handle numpy array
+        else:
+            import numpy as np
+
+            if isinstance(image_data, np.ndarray):
+                image = Image.fromarray(image_data)
+            else:
+                raise ValueError(f"Unsupported image type: {type(image_data)}")
+
+        # Convert to RGB
+        if image.mode == "RGBA":
+            background = Image.new("RGB", image.size, (255, 255, 255))
+            background.paste(image, mask=image.split()[3])
+            image = background
+        elif image.mode != "RGB":
+            image = image.convert("RGB")
+
+        return image
+
+    def _get_caption(self, sample: dict, idx: int) -> str:
+        """Extract caption from sample with fallback logic.
+
+        Args:
+            sample: Dataset sample dictionary
+            idx: Sample index (for fallback caption)
+
+        Returns:
+            Caption string
+        """
+        caption = None
+
+        # Check for multi-column captions (e.g., caption_0, caption_1, ...)
+        caption_columns = [key for key in sample.keys() if key.startswith("caption_")]
+        if caption_columns:
+            selected_col = random.choice(caption_columns)
+            caption = sample.get(selected_col)
+        else:
+            # Try single caption field
+            for field in [self.caption_field, "text", "caption", "captions", "json"]:
+                value = sample.get(field)
+                if value is not None:
+                    # Handle nested dict (e.g., json: {"caption": "..."})
+                    if isinstance(value, dict):
+                        caption = value.get("caption") or value.get("text")
+                    else:
+                        caption = value
+                    if caption is not None:
+                        break
+
+        if caption is None:
+            caption = f"image_{idx}"
+
+        # Handle multiple captions if it's a list
+        if isinstance(caption, list):
+            caption = random.choice(caption)
+
+        return str(caption)
+
     def __len__(self) -> int:
         return self.size
 
@@ -487,13 +612,139 @@ class CaptionDataset(Dataset):
         else:
             sample = self.dataset_split[idx]
 
-        # Get image
-        image = sample.get(self.image_field)
-        if image is None:
+        # Get image data
+        image_data = sample.get(self.image_field)
+        if image_data is None:
             raise ValueError(f"Image field '{self.image_field}' not found in sample")
 
-        if not isinstance(image, Image.Image):
-            image = Image.fromarray(image)
+        # Load and process image
+        image = self._load_image(image_data)
+
+        # Get caption
+        caption = self._get_caption(sample, idx)
+
+        if self.transform:
+            image = self.transform(image)
+
+        return {
+            "image": image,
+            "caption": caption,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"CaptionDataset("
+            f"dataset={self.dataset_name}, "
+            f"split={self.split}, "
+            f"size={self.target_size}x{self.target_size}, "
+            f"streaming={self.streaming}, "
+            f"num_samples={self.size})"
+        )
+
+
+class StreamingCaptionDataset(IterableDataset):
+    """Streaming dataset for very large image-caption datasets.
+
+    Uses true streaming with IterableDataset for memory-efficient training.
+    Supports loading images from URLs with retry logic.
+
+    Args:
+        dataset_name: HuggingFace dataset name
+        split: Dataset split
+        transform: Optional custom transform
+        image_field: Name of the image field
+        caption_field: Name of the caption field
+        target_size: Target image size
+        url_timeout: Timeout for URL requests
+        max_retries: Maximum retries for failed requests
+        skip_failures: Skip failed samples instead of raising errors
+        buffer_size: Shuffle buffer size for randomization
+    """
+
+    def __init__(
+        self,
+        dataset_name: str,
+        split: str = "train",
+        transform: Callable | None = None,
+        image_field: str = "image",
+        caption_field: str = "caption",
+        target_size: int = 64,
+        url_timeout: int = 10,
+        max_retries: int = 3,
+        skip_failures: bool = True,
+        buffer_size: int = 1000,
+    ) -> None:
+        super().__init__()
+        self.dataset_name = dataset_name
+        self.split = split
+        self.image_field = image_field
+        self.caption_field = caption_field
+        self.target_size = target_size
+        self.url_timeout = url_timeout
+        self.max_retries = max_retries
+        self.skip_failures = skip_failures
+        self.buffer_size = buffer_size
+
+        if transform is None:
+            self.transform = transforms.Compose(
+                [
+                    transforms.Resize(
+                        (target_size, target_size),
+                        interpolation=transforms.InterpolationMode.BICUBIC,
+                    ),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+                ]
+            )
+        else:
+            self.transform = transform
+
+        print(f"StreamingCaptionDataset: {dataset_name} (split={split})")
+
+    def _load_image_from_url(self, url: str) -> Image.Image:
+        """Load image from URL with retry logic."""
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                response = requests.get(
+                    url,
+                    timeout=self.url_timeout,
+                    headers={"User-Agent": "tiny-stable-diffusion/1.0"},
+                )
+                response.raise_for_status()
+                image = Image.open(io.BytesIO(response.content))
+                return image
+            except requests.exceptions.Timeout:
+                last_error = f"Timeout after {self.url_timeout}s"
+            except requests.exceptions.HTTPError as e:
+                last_error = f"HTTP error: {e.response.status_code}"
+                if e.response.status_code == 404:
+                    break
+            except requests.exceptions.RequestException as e:
+                last_error = f"Request error: {e}"
+            except Exception as e:
+                last_error = f"Failed to open image: {e}"
+
+        raise RuntimeError(f"Failed to load image from {url}: {last_error}")
+
+    def _load_image(self, image_data) -> Image.Image:
+        """Load image from various sources."""
+        if isinstance(image_data, str):
+            if image_data.startswith(("http://", "https://")):
+                image = self._load_image_from_url(image_data)
+            else:
+                image = Image.open(image_data)
+        elif isinstance(image_data, bytes):
+            image = Image.open(io.BytesIO(image_data))
+        elif isinstance(image_data, Image.Image):
+            image = image_data
+        else:
+            import numpy as np
+
+            if isinstance(image_data, np.ndarray):
+                image = Image.fromarray(image_data)
+            else:
+                raise ValueError(f"Unsupported image type: {type(image_data)}")
 
         # Convert to RGB
         if image.mode == "RGBA":
@@ -503,45 +754,92 @@ class CaptionDataset(Dataset):
         elif image.mode != "RGB":
             image = image.convert("RGB")
 
-        # Get caption (try multiple field names and formats)
+        return image
+
+    def _get_caption(self, sample: dict) -> str:
+        """Extract caption from sample."""
         caption = None
 
-        # Check for multi-column captions (e.g., caption_0, caption_1, ...)
-        # This format is used by datasets like jxie/flickr8k
         caption_columns = [key for key in sample.keys() if key.startswith("caption_")]
         if caption_columns:
-            # Randomly select one caption for data augmentation
             selected_col = random.choice(caption_columns)
             caption = sample.get(selected_col)
         else:
-            # Try single caption field
-            for field in [self.caption_field, "text", "caption", "captions"]:
-                caption = sample.get(field)
-                if caption is not None:
-                    break
+            for field in [self.caption_field, "text", "caption", "captions", "json"]:
+                value = sample.get(field)
+                if value is not None:
+                    # Handle nested dict (e.g., json: {"caption": "..."})
+                    if isinstance(value, dict):
+                        caption = value.get("caption") or value.get("text")
+                    else:
+                        caption = value
+                    if caption is not None:
+                        break
 
         if caption is None:
-            caption = f"image_{idx}"
+            caption = "an image"
 
-        # Handle multiple captions if it's a list
         if isinstance(caption, list):
-            caption = random.choice(caption)  # Randomly select for augmentation
+            caption = random.choice(caption)
 
-        if self.transform:
-            image = self.transform(image)
+        return str(caption)
 
-        return {
-            "image": image,
-            "caption": str(caption),
-        }
+    def _process_sample(self, sample: dict) -> dict[str, torch.Tensor | str] | None:
+        """Process a single sample."""
+        try:
+            image_data = sample.get(self.image_field)
+            if image_data is None:
+                return None
+
+            image = self._load_image(image_data)
+            caption = self._get_caption(sample)
+
+            if self.transform:
+                image = self.transform(image)
+
+            return {
+                "image": image,
+                "caption": caption,
+            }
+        except Exception as e:
+            if self.skip_failures:
+                return None
+            raise e
+
+    def __iter__(self):
+        from datasets import load_dataset
+
+        dataset = load_dataset(
+            self.dataset_name,
+            split=self.split,
+            streaming=True,
+        )
+
+        # Shuffle buffer for randomization
+        buffer = []
+
+        for sample in dataset:
+            processed = self._process_sample(sample)
+            if processed is not None:
+                buffer.append(processed)
+
+                if len(buffer) >= self.buffer_size:
+                    # Yield a random sample from buffer
+                    idx = random.randint(0, len(buffer) - 1)
+                    yield buffer.pop(idx)
+
+        # Yield remaining samples in buffer
+        random.shuffle(buffer)
+        for sample in buffer:
+            yield sample
 
     def __repr__(self) -> str:
         return (
-            f"CaptionDataset("
+            f"StreamingCaptionDataset("
             f"dataset={self.dataset_name}, "
             f"split={self.split}, "
             f"size={self.target_size}x{self.target_size}, "
-            f"num_samples={self.size})"
+            f"buffer_size={self.buffer_size})"
         )
 
 

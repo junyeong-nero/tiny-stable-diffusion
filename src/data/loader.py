@@ -6,7 +6,12 @@ from typing import Any
 
 from torch.utils.data import DataLoader, Dataset
 
-from src.data.dataset import CIFAR100Dataset, CaptionDataset, EmojiDataset
+from src.data.dataset import (
+    CIFAR100Dataset,
+    CaptionDataset,
+    EmojiDataset,
+    StreamingCaptionDataset,
+)
 
 
 def get_dataset(config: dict[str, Any]) -> Dataset:
@@ -41,6 +46,8 @@ def get_dataset(config: dict[str, Any]) -> Dataset:
         target_size = config.get("image_size", 32)
         streaming = config.get("streaming", False)
         split = config.get("split", "train")
+        url_timeout = config.get("url_timeout", 10)
+        max_retries = config.get("max_retries", 3)
 
         print(f"Loading caption dataset: {dataset_name}")
         return CaptionDataset(
@@ -50,6 +57,33 @@ def get_dataset(config: dict[str, Any]) -> Dataset:
             caption_field=caption_field,
             target_size=target_size,
             streaming=streaming,
+            url_timeout=url_timeout,
+            max_retries=max_retries,
+        )
+
+    elif data_source == "streaming_caption":
+        # Streaming dataset for very large datasets (LAION, Open Images, etc.)
+        dataset_name = config.get("dataset_name")
+        image_field = config.get("image_field", "image")
+        caption_field = config.get("caption_field", "caption")
+        target_size = config.get("image_size", 64)
+        split = config.get("split", "train")
+        url_timeout = config.get("url_timeout", 10)
+        max_retries = config.get("max_retries", 3)
+        skip_failures = config.get("skip_failures", True)
+        buffer_size = config.get("buffer_size", 1000)
+
+        print(f"Loading streaming caption dataset: {dataset_name}")
+        return StreamingCaptionDataset(
+            dataset_name=dataset_name,
+            split=split,
+            image_field=image_field,
+            caption_field=caption_field,
+            target_size=target_size,
+            url_timeout=url_timeout,
+            max_retries=max_retries,
+            skip_failures=skip_failures,
+            buffer_size=buffer_size,
         )
 
     elif data_source == "cifar100":
