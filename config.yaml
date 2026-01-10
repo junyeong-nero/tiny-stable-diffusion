@@ -113,3 +113,17 @@ diffusion_train:
     # MMDiT-specific settings
     qk_rmsnorm: true
     register_tokens: 0
+
+# =============================================================================
+# HuggingFace Hub Settings
+# =============================================================================
+hub:
+    # Push to HuggingFace Hub after training
+    push_to_hub: false
+    # Repository ID (e.g., "username/tiny-sd-vae")
+    # If not set, will be prompted during upload
+    model_id: null
+    # Create private repository
+    private: false
+    # HuggingFace token (recommended to use HF_TOKEN env var instead)
+    # token: null

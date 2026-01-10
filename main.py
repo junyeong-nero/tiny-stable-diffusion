@@ -57,6 +57,11 @@ def main() -> None:
     parser.add_argument("--wandb-project", type=str, default="tiny-stable-diffusion", help="Wandb project")
     parser.add_argument("--wandb-run-name", type=str, default=None, help="Wandb run name")
 
+    # HuggingFace Hub arguments
+    parser.add_argument("--push-to-hub", action="store_true", help="Push trained model to HuggingFace Hub")
+    parser.add_argument("--hub-model-id", type=str, default=None, help="HuggingFace model ID (e.g., username/model-name)")
+    parser.add_argument("--hub-private", action="store_true", help="Create private repository on HuggingFace Hub")
+
     args = parser.parse_args()
 
     if args.train_vae:
@@ -80,6 +85,42 @@ def main() -> None:
 
     else:
         parser.print_help()
+
+
+def _push_model_to_hub(
+    checkpoint_path: str,
+    model_type: str,
+    hub_model_id: str | None,
+    private: bool,
+    config: dict,
+) -> None:
+    """Push trained model to HuggingFace Hub."""
+    from src.utils.hf_upload import check_hf_hub_available, push_to_hub
+
+    if not check_hf_hub_available():
+        print("Error: huggingface_hub not installed. Install with: pip install huggingface_hub")
+        return
+
+    if hub_model_id is None:
+        print("Error: --hub-model-id required for --push-to-hub")
+        return
+
+    if not Path(checkpoint_path).exists():
+        print(f"Error: Checkpoint not found: {checkpoint_path}")
+        return
+
+    print(f"\nPushing {model_type} model to HuggingFace Hub...")
+    try:
+        url = push_to_hub(
+            checkpoint_path=checkpoint_path,
+            repo_id=hub_model_id,
+            model_type=model_type,
+            config=config,
+            private=private,
+        )
+        print(f"Model uploaded successfully: {url}")
+    except Exception as e:
+        print(f"Error uploading to HuggingFace Hub: {e}")
 
 
 def _run_vae_training(args: argparse.Namespace) -> None:
@@ -108,6 +149,16 @@ def _run_vae_training(args: argparse.Namespace) -> None:
     config["wandb_run_name"] = args.wandb_run_name or "vae-training"
 
     train_vae(config, use_wandb=args.wandb)
+
+    # Push to HuggingFace Hub if requested
+    if args.push_to_hub:
+        _push_model_to_hub(
+            checkpoint_path=config["checkpoint_path"],
+            model_type="vae",
+            hub_model_id=args.hub_model_id,
+            private=args.hub_private,
+            config=config,
+        )
 
 
 def _run_diffusion_training(args: argparse.Namespace) -> None:
@@ -139,6 +190,16 @@ def _run_diffusion_training(args: argparse.Namespace) -> None:
     config["wandb_run_name"] = args.wandb_run_name or "diffusion-training"
 
     train_diffusion(config, use_wandb=args.wandb)
+
+    # Push to HuggingFace Hub if requested
+    if args.push_to_hub:
+        _push_model_to_hub(
+            checkpoint_path=config["checkpoint_path"],
+            model_type="diffusion",
+            hub_model_id=args.hub_model_id,
+            private=args.hub_private,
+            config=config,
+        )
 
 
 def _run_generation(args: argparse.Namespace) -> None:
