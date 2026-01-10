@@ -55,10 +55,12 @@ def train_vae_one_epoch(
     epoch_loss = 0.0
     epoch_recon_loss = 0.0
     epoch_kl_loss = 0.0
+    num_batches = 0
 
     progress_bar = tqdm(dataloader, desc="VAE Training")
 
     for batch in progress_bar:
+        num_batches += 1
         images = batch["image"].to(device)
 
         optimizer.zero_grad()
@@ -105,8 +107,7 @@ def train_vae_one_epoch(
 
         global_step += 1
 
-    num_batches = len(dataloader)
-    return epoch_loss / num_batches, global_step
+    return epoch_loss / max(1, num_batches), global_step
 
 
 @torch.no_grad()
