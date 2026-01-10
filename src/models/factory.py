@@ -1,4 +1,9 @@
-"""DiT model factory - unified interface for VanillaDiT and MMDiT."""
+"""DiT model factory - unified interface for VanillaDiT and MMDiT.
+
+For latent-space diffusion (Stable Diffusion 3 style):
+- in_channels=16 (VAE latent channels)
+- image_size=8 (latent spatial size, e.g., 64/8=8)
+"""
 
 from __future__ import annotations
 
@@ -16,9 +21,13 @@ class DiT(nn.Module):
 
     Factory class that returns the appropriate model based on model_type.
 
+    For latent-space diffusion (SD3 style):
+        - Use in_channels=16 (latent channels from VAE)
+        - Use image_size=latent_size (e.g., 8 for 64x64 images with f8 compression)
+
     Args:
-        in_channels: Number of input channels (default: 3 for RGB)
-        image_size: Input image size (default: 32)
+        in_channels: Number of input channels (3 for RGB, 16 for latent space)
+        image_size: Input spatial size (actual image size or latent size)
         patch_size: Patch size for patch embedding (default: 2)
         model_size: Model size - S, B, L, or XL
         clip_embed_dim: CLIP text embedding dimension
@@ -32,8 +41,8 @@ class DiT(nn.Module):
 
     def __init__(
         self,
-        in_channels: int = 3,
-        image_size: int = 32,
+        in_channels: int = 16,
+        image_size: int = 8,
         patch_size: int = 2,
         model_size: Literal["S", "B", "L", "XL"] = "S",
         clip_embed_dim: int = 512,

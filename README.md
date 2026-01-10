@@ -1,269 +1,308 @@
-# 🎨 text-to-emoji: Text-to-Pixel Art Generator
+# tiny-stable-diffusion
+
+> **Stable Diffusion 3 from Scratch** - A minimal educational implementation
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange) ![License](https://img.shields.io/badge/License-MIT-green)
 
-> **"Transform your imagination into retro 32x32 pixel art emojis."**
-> A diffusion-based model that generates unique, custom emoji-style pixel art from text prompts.
+## Overview
 
-## 📖 Introduction
+**tiny-stable-diffusion**은 교육 목적으로 Stable Diffusion 3 파이프라인을 처음부터 구현한 프로젝트입니다. 실제 SD3와 동일한 구조를 따르면서 64x64 해상도로 경량화하여 일반 GPU에서도 학습할 수 있습니다.
 
-text-to-emoji is a multi-modal generative AI model that transforms natural language descriptions into 32×32 pixel art emojis. Built with state-of-the-art diffusion transformer technology, it produces high-quality, text-conditioned imagery suitable for Discord/Slack emojis, game sprites, or any retro-styled creative project.
-
-### ✨ Key Features
-
-- **Text-to-Image Generation**: Create images from prompts like "astronaut", "cute robot", or "grinning cat"
-- **Pixel Art Style**: Outputs optimized for 32×32 resolution with authentic retro/dot aesthetic
-- **Diffusion Transformer (DiT)**: Modern transformer-based architecture with AdaLN-Zero conditioning
-- **Fast Sampling**: DDIM (Denoising Diffusion Implicit Models) for rapid generation
-- **Classifier-Free Guidance (CFG)**: Enhanced prompt adherence for more accurate results
-- **Two-Stage Training**: Pretrain on image-caption datasets (Flickr8k/CC3M), fine-tune on emoji data
-
-## 🧠 Model Architecture
-
-text-to-emoji supports two transformer architectures:
-
-1. **DiT (Diffusion Transformer)** - From "Scalable Diffusion Models with Transformers" (Google Research, 2023)
-2. **MMDiT (Multi-Modal DiT)** - From Stable Diffusion 3 (Esser et al., 2024)
+### 핵심 파이프라인
 
 ```
-Input Image (32×32 RGB)
-    ↓
-Patch Embedding (Conv 3→384, patch_size=2)
-    ↓
-Add Position Embeddings
-    ↓
-DiT Blocks × 12 (transformer layers)
-    ├── Self-Attention (global attention on patches)
-    ├── Cross-Attention OR Joint Attention (text conditioning)
-    └── AdaLN-Zero (timestep conditioning)
-    ↓
-Patch Decoder (Conv 384→3)
-    ↓
-Output Image (32×32 RGB)
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    Stable Diffusion 3 Pipeline                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1. VAE Training (Stage 1)                                              │
+│     Image → Encoder → Latent Space → Decoder → Reconstructed Image      │
+│                                                                         │
+│  2. Diffusion Training (Stage 2)                                        │
+│     Image → [Frozen VAE] → Latent → DiT + Text → Noise Prediction       │
+│                                                                         │
+│  3. Generation (Inference)                                              │
+│     Noise → DiT Denoise → Clean Latent → [VAE Decoder] → Image          │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Architecture Comparison
+### 왜 Latent Space Diffusion인가?
 
-| Feature | DiT (Standard) | MMDiT (SD3) |
-|---------|---------------|-------------|
-| **Text Conditioning** | Cross-Attention | Joint Attention |
-| **Parameters (DiT-S)** | ~30M | ~87M |
-| **Attention** | Separate image/text attention | Unified text-image attention |
-| **Library** | Custom implementation | [lucidrains/mmdit](https://github.com/lucidrains/mmdit) |
+| Pixel Space | Latent Space |
+|-------------|--------------|
+| 64×64×3 = 12,288 차원 | 8×8×16 = 1,024 차원 |
+| 계산량 많음 | **12배 효율적** |
+| 메모리 사용량 높음 | **메모리 절약** |
+| 고해상도 어려움 | **고해상도 가능** |
 
-### 1. Text Encoder (CLIP)
+VAE로 이미지를 압축한 후 latent space에서 diffusion을 수행하면 훨씬 효율적으로 학습할 수 있습니다.
 
-Uses OpenAI's **CLIP** Text Encoder in frozen mode:
-- Converts text prompts to pooled embeddings (B, D)
-- Provides text conditioning for the diffusion model
-- Enables semantic understanding of natural language
+---
 
-### 2. Diffusion Process
+## Architecture
 
-- **Forward Process**: Gradually adds Gaussian noise over 1000 timesteps
-- **Reverse Process**: DiT predicts and removes noise to reconstruct images
-- **DDIM Sampling**: Fast deterministic sampling in 50-100 steps
-- **Classifier-Free Guidance**: Enhanced prompt adherence (scale=7.5)
-
-### 3. Model Configurations
-
-#### DiT Models (Standard)
-
-| Model | Layers | Hidden Size | Heads | Parameters |
-|-------|--------|-------------|-------|------------|
-| DiT-S | 12 | 384 | 6 | ~30M |
-| DiT-B | 12 | 768 | 12 | ~130M |
-| DiT-L | 24 | 1024 | 16 | ~300M |
-| DiT-XL | 28 | 1152 | 16 | ~675M |
-
-#### MMDiT Models (Stable Diffusion 3)
-
-| Model | Layers | Hidden Size | Heads | Parameters |
-|-------|--------|-------------|-------|------------|
-| MMDiT-S | 12 | 384 | 6 | ~87M |
-| MMDiT-B | 12 | 768 | 12 | ~300M |
-| MMDiT-L | 24 | 1024 | 16 | ~675M |
-| MMDiT-XL | 28 | 1152 | 16 | ~1.6B |
-
-**Default**: **DiT-S** (~30M parameters for DiT, ~87M for MMDiT) for efficient training and inference.
-
-Configure model size in `config.yaml`:
-```yaml
-model_type: mmdit  # or "dit"
-model_size: S      # Options: S, B, L, XL
-```
-
-### 4. MMDiT-Specific Features
-
-- **qk_rmsnorm**: Use RMSNorm for QK attention (recommended: true)
-- **register_tokens**: Register tokens from "Vision Transformers Need Registers" (0 or 4)
-
-## 📂 Dataset
-
-Supports multiple datasets for flexible training:
-
-### 1. Emoji Dataset (Fine-tuning)
-- **Source**: [junyeong-nero/emoji-32](https://huggingface.co/datasets/junyeong-nero/emoji-32)
-- **Size**: ~1,900 emoji images
-- **Resolution**: 32×32 RGB
-
-### 2. Pretrain Datasets (Text-to-Image)
-
-#### 📊 Dataset Scale Analysis
-
-**How many images do you need for pretrain?**
-
-Large-scale research typically uses:
-- **DiT-XL/2** (256×256): 1.3M images (ImageNet)
-- **Stable Diffusion**: 600M-2.3B images (LAION)
-- **Scaling Law studies**: 108M+ images
-
-But for **32×32 resolution**, requirements are much lower:
-- 32×32 has **64× less pixels** than 256×256 (8² = 64)
-- Simpler patterns, smaller model (~30M params for DiT-S)
-- **Estimate: 20K-100K image-caption pairs** can produce meaningful results
-
-#### ✅ Immediately Usable Datasets (Images Included)
-
-| Dataset | Images | Captions | Effective Pairs | Format | Status |
-|---------|--------|----------|-----------------|--------|--------|
-| **jxie/flickr8k** ⭐ | 8,000 | 5 per image | **40,000** | Well-organized columns | ✅ Recommended |
-| **jxie/flickr8k** | 8,000 | 5 per image | **40,000** | Captions as list | ✅ Alternative |
-| **Pokemon BLIP** 🎮 | 833 | 1 per image | 833 | Single caption | ✅ Tested |
-
-**Why jxie/flickr8k?**
-- Captions organized as separate columns (`caption_0` to `caption_4`)
-- Images pre-loaded as PIL objects (faster)
-- Cleaner data structure for easy access
-- One caption randomly selected per training iteration (automatic data augmentation)
-
-#### ⚠️ Large-Scale Datasets (URLs Only - Download Required)
-
-| Dataset | Images | Note |
-|---------|--------|------|
-| **CC3M** | 3.3M | Requires `img2dataset` to download actual images |
-| **CC12M** | 12M | Requires `img2dataset` to download actual images |
-| **LAION** | 5B | Requires `img2dataset` to download actual images |
-
-Most large datasets only provide image URLs, not actual images. You'll need to:
-1. Download images using tools like [`img2dataset`](https://github.com/rom1504/img2dataset)
-2. Handle broken URLs (~20-40% failure rate)
-3. Wait several hours to days for downloads
-
-#### 🎯 Why Flickr8k is Sufficient
-
-**For 32×32 DiT pretrain, Flickr8k (8K images, 40K captions) is a solid choice:**
-
-✅ **Advantages**:
-- **High-quality captions**: Human-written, 5 per image
-- **Effective 40K training pairs**: With data augmentation, even more
-- **Instant availability**: No download scripts needed
-- **32×32 resolution advantage**: Simpler patterns, less data needed
-- **Fast experimentation**: 4-8 hour training time
-
-⚠️ **Limitations**:
-- Smaller than typical pretrain datasets (50K-100K+ recommended)
-- Limited scene/concept diversity
-- Text-image alignment may be weaker than larger datasets
-
-**Performance Expectations**:
+### 전체 시스템 구조
 
 ```
-Pokemon (833)     ▓░░░░░░░░░  10% - Fine-tuning only
-Flickr8k (8K)     ▓▓▓░░░░░░░  30% - Basic concepts, color, shape
-Flickr30k (30K)   ▓▓▓▓▓░░░░░  50% - Decent pretrain
-CC3M (3.3M)       ▓▓▓▓▓▓▓▓░░  80% - Strong pretrain (requires download)
-CC12M (12M)       ▓▓▓▓▓▓▓▓▓▓ 100% - Production-ready (requires download)
+┌─────────────────────────────────────────────────────────────────┐
+│                    tiny-stable-diffusion                        │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ Stage 1: VAE Training                                           │
+│                                                                 │
+│   ┌─────────┐      ┌─────────┐      ┌─────────┐                │
+│   │  Image  │  ->  │ Encoder │  ->  │ Latent  │                │
+│   │ (64×64) │      │         │      │(16,8,8) │                │
+│   └─────────┘      └─────────┘      └────┬────┘                │
+│                                          │                      │
+│                                          v                      │
+│   ┌─────────┐      ┌─────────┐      ┌─────────┐                │
+│   │  Recon  │  <-  │ Decoder │  <-  │ Sample  │                │
+│   │  Image  │      │         │      │  z~N    │                │
+│   └─────────┘      └─────────┘      └─────────┘                │
+│                                                                 │
+│   Loss = MSE(Image, Recon) + β × KL(q(z|x) || p(z))            │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ Stage 2: Diffusion Training (Latent Space)                      │
+│                                                                 │
+│   ┌─────────┐      ┌─────────┐      ┌─────────┐                │
+│   │  Image  │  ->  │   VAE   │  ->  │ Latent  │                │
+│   │ (64×64) │      │ Encoder │      │(16,8,8) │                │
+│   └─────────┘      └─────────┘      └────┬────┘                │
+│                     (frozen)              │                     │
+│                                          v                      │
+│   ┌─────────┐      ┌─────────┐      ┌─────────┐                │
+│   │Predicted│  <-  │   DiT   │  <-  │ Noisy   │                │
+│   │  Noise  │      │ + Text  │      │ Latent  │                │
+│   └─────────┘      └─────────┘      └─────────┘                │
+│                                                                 │
+│   Loss = MSE(Predicted Noise, Actual Noise) × SNR Weight        │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ Stage 3: Generation                                             │
+│                                                                 │
+│   ┌─────────┐      ┌─────────┐      ┌─────────┐      ┌───────┐ │
+│   │ Random  │  ->  │   DiT   │  ->  │  Clean  │  ->  │ Image │ │
+│   │  Noise  │      │ Denoise │      │ Latent  │      │(64×64)│ │
+│   └─────────┘      └─────────┘      └─────────┘      └───────┘ │
+│                    (DDIM 50步)            │                     │
+│                         ^                 v                     │
+│                    ┌─────────┐      ┌─────────┐                │
+│                    │  Text   │      │   VAE   │                │
+│                    │  CLIP   │      │ Decoder │                │
+│                    └─────────┘      └─────────┘                │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-#### 📝 Recommended Strategy
+### VAE (Variational AutoEncoder)
 
-**Option 1: Start with Flickr8k** (Recommended for beginners) ⚡
-```bash
-python main.py --pretrain --epochs 200 --batch-size 32
+SD3 스타일의 AutoencoderKL 구현:
+
 ```
-- Training time: 4-8 hours
-- Good for validation and testing
-- If results are promising, proceed to fine-tuning
+Encoder:
+  Conv3x3(3→64) → ResBlock×2 → Downsample
+                → ResBlock×2 → Downsample
+                → ResBlock×2 → Downsample
+                → ResBlock×2 → SelfAttention → ResBlock
+                → Conv3x3(512→32) → [mean, logvar]
 
-**Option 2: Download CC3M** (For serious pretrain) 🔧
-```bash
-# Install img2dataset
-pip install img2dataset
-
-# Download CC3M images (takes several hours)
-img2dataset --url_list cc3m.parquet \
-    --output_folder data/cc3m \
-    --resize_mode no \
-    --thread_count 16
-
-# Then train
-python main.py --pretrain --dataset data/cc3m
+Decoder:
+  Conv3x3(16→512) → ResBlock → SelfAttention → ResBlock
+                  → ResBlock×3 → Upsample
+                  → ResBlock×3 → Upsample
+                  → ResBlock×3 → Upsample
+                  → Conv3x3(64→3)
 ```
 
-**Option 3: Hybrid Approach** (Best of both worlds) 🎯
-```bash
-# Quick test with Flickr8k
-python main.py --pretrain --dataset jxie/flickr8k --epochs 50
+| 설정 | 값 |
+|------|-----|
+| Input | 64×64×3 RGB |
+| Latent | 8×8×16 |
+| Compression | f8 (8배 압축) |
+| Base channels | 64 |
+| Channel multipliers | [1, 2, 4, 4] |
+| Parameters | ~21M |
 
-# If results are good, extend training or switch to CC3M
-python main.py --pretrain --dataset data/cc3m --epochs 100
+### Diffusion Transformer (DiT)
+
+| Size | Layers | Hidden | Heads | Params | 용도 |
+|------|--------|--------|-------|--------|------|
+| **S** | 12 | 384 | 6 | ~40M | 기본값, 빠른 실험 |
+| B | 12 | 768 | 12 | ~130M | 중간 규모 |
+| L | 24 | 1024 | 16 | ~300M | 고품질 |
+| XL | 28 | 1152 | 16 | ~675M | 최고 품질 |
+
+**DiT Block 구조:**
+```
+Input → LayerNorm → Self-Attention → + → LayerNorm → Cross-Attention → + → LayerNorm → MLP → + → Output
+         ↑                           |                                  |               |
+         └── AdaLN-Zero (timestep) ──┴──────────────────────────────────┴───────────────┘
+                                     (text conditioning)
 ```
 
-#### ⚙️ Configuration
+### 실제 SD3와의 비교
 
-Edit `config.yaml`:
-```yaml
-pretrain:
-    data_source: caption
-    dataset_name: jxie/flickr8k  # Recommended: well-organized format
-    # Alternative: jxie/flickr8k (captions as list)
-    image_field: image
-    caption_field: caption  # Auto-detects caption_0, caption_1, etc.
-    streaming: false
-    epochs: 200  # More epochs for smaller dataset
-```
+| Component | Stable Diffusion 3 | tiny-stable-diffusion |
+|-----------|-------------------|----------------------|
+| Image Size | 1024×1024 | **64×64** |
+| VAE Latent Channels | 16 | **16** |
+| VAE Compression | f8 | **f8** |
+| Diffusion Architecture | MMDiT | **DiT / MMDiT** |
+| Text Encoder | T5-XXL + CLIP-G + CLIP-L | **CLIP ViT-B/32** |
+| Total Parameters | 2B+ | **~60M** |
+| Training Time | 수천 GPU-hours | **수 시간** |
 
-**Not Recommended**:
-- **CIFAR-100**: Image classification dataset (no captions) - poor for text-to-image learning
+---
 
-## 🚀 Quick Start
+## Quick Start
 
-### Installation
+### 설치
 
 ```bash
-# Install uv (fast Python package manager)
+# uv 패키지 매니저 설치 (권장)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install dependencies
+# 의존성 설치
 uv sync
+
+# 또는 pip 사용
+pip install -e .
 ```
 
-### Two-Stage Training (Recommended)
+### 전체 학습 파이프라인
 
-**Stage 1: Pretrain** (Text-to-Image Dataset)
 ```bash
-# Default: Flickr8k (8K images, 40K captions - tested and working)
-uv run main.py --pretrain --epochs 200 --batch-size 32
+# Step 1: VAE 학습 (이미지 압축 학습)
+uv run main.py --train-vae --epochs 100 --batch-size 32
 
-# Pokemon BLIP (very small, pixel art style - for quick testing only)
-uv run main.py --pretrain --dataset reach-vb/pokemon-blip-captions --epochs 500
+# Step 2: Diffusion 학습 (latent space에서 노이즈 제거 학습)
+uv run main.py --train-diffusion --epochs 200 --batch-size 32
 
-# Note: CC3M/CC12M require separate image download (see Dataset section)
+# Step 3: 이미지 생성
+uv run main.py --generate --prompt "a cute cat sitting on a couch"
 ```
 
-**Stage 2: Fine-tune on Emoji**
+### 빠른 테스트
+
 ```bash
-# Default emoji dataset with pretrained checkpoint
-uv run main.py --finetune \
-    --checkpoint checkpoints/pretrain_flickr8k.pt \
+# 작은 데이터셋으로 빠르게 테스트
+uv run main.py --train-vae --epochs 10 --dataset reach-vb/pokemon-blip-captions
+uv run main.py --train-diffusion --epochs 20 --dataset reach-vb/pokemon-blip-captions
+```
+
+---
+
+## Training Guide
+
+### Stage 1: VAE Training
+
+VAE는 이미지를 latent space로 압축하고 다시 복원하는 방법을 학습합니다.
+
+```bash
+uv run main.py --train-vae \
     --epochs 100 \
-    --batch-size 16
+    --batch-size 32 \
+    --learning-rate 1e-4
+```
 
-# With custom dataset
-uv run main.py --finetune \
-    --dataset user/my-emoji-dataset \
-    --checkpoint checkpoints/pretrain_flickr8k.pt
+**주요 설정 (config.yaml):**
+```yaml
+vae_train:
+    image_size: 64           # 입력 이미지 크기
+    latent_channels: 16      # latent 채널 수 (SD3 스타일)
+    vae_ch: 64               # VAE 기본 채널
+    vae_ch_mult: [1, 2, 4, 4]  # 채널 증가 비율
+    kl_weight: 1.0e-6        # KL divergence 가중치
+    epochs: 100
+    batch_size: 32
+    learning_rate: 1.0e-4
+    checkpoint_path: checkpoints/vae.pt
+```
+
+**학습 팁:**
+- `kl_weight`가 너무 크면 reconstruction quality가 떨어집니다
+- `kl_weight`가 너무 작으면 posterior collapse가 발생할 수 있습니다
+- 권장 시작값: `1e-6`
+
+**출력:**
+- `checkpoints/vae.pt`: 학습된 VAE 체크포인트
+- `samples/vae_epoch_N/`: reconstruction 샘플 이미지
+
+### Stage 2: Diffusion Training
+
+사전 학습된 VAE를 사용하여 latent space에서 diffusion 모델을 학습합니다.
+
+```bash
+uv run main.py --train-diffusion \
+    --vae-checkpoint checkpoints/vae.pt \
+    --epochs 200 \
+    --batch-size 32
+```
+
+**주요 설정 (config.yaml):**
+```yaml
+diffusion_train:
+    image_size: 64           # 원본 이미지 크기
+    latent_size: 8           # latent 공간 크기 (64/8)
+    in_channels: 16          # latent 채널 (VAE와 일치)
+
+    # CFG (Classifier-Free Guidance) 설정
+    initial_cfg_prob: 0.0    # 초기 unconditional dropout 확률
+    final_cfg_prob: 0.1      # 최종 unconditional dropout 확률
+    cfg_warmup_epochs: 10    # CFG warmup 기간
+
+    # VAE
+    vae_checkpoint: checkpoints/vae.pt
+
+    epochs: 200
+    batch_size: 32
+    learning_rate: 1.0e-4
+    checkpoint_path: checkpoints/diffusion.pt
+```
+
+**학습 과정:**
+1. 이미지를 frozen VAE encoder로 latent로 변환
+2. Latent에 노이즈 추가
+3. DiT가 노이즈 예측
+4. MSE loss로 학습
+
+**출력:**
+- `checkpoints/diffusion.pt`: 학습된 diffusion 체크포인트
+- `samples/epoch_N/`: 생성된 샘플 이미지
+
+---
+
+## Generation
+
+### 기본 생성
+
+```bash
+# 단일 프롬프트
+uv run main.py --generate --prompt "a photo of a cat"
+
+# 여러 프롬프트
+uv run main.py --generate --prompt "cat,dog,sunset,mountain"
+
+# 프롬프트당 여러 샘플
+uv run main.py --generate --prompt "a robot" --num-samples 4
+```
+
+### 고급 옵션
+
+```bash
+uv run main.py --generate \
+    --prompt "a beautiful landscape with mountains" \
+    --checkpoint checkpoints/diffusion.pt \
+    --vae-checkpoint checkpoints/vae.pt \
+    --steps 100 \           # diffusion steps (default: 50)
+    --guidance 7.5 \        # CFG scale (default: 7.5)
+    --seed 42 \             # 재현성을 위한 시드
+    --output my_image.png
 ```
 
 ### Interactive Demo
@@ -272,264 +311,255 @@ uv run main.py --finetune \
 uv run main.py --demo
 ```
 
-Enter prompts to generate images interactively. Type 'quit' to exit.
-
-## 📖 Training Guide
-
-### Two-Stage Training Pipeline
-
-For best results with limited emoji data, use the two-stage approach:
-
-**Stage 1: Pretraining** (Image-Caption Dataset)
-
-```bash
-# Flickr8k: 8K images with 40K human-written captions (recommended starting point)
-uv run main.py --pretrain --epochs 200 --batch-size 32
-
-# Pokemon BLIP: 833 pixel art images (for quick testing)
-uv run main.py --pretrain \
-    --dataset reach-vb/pokemon-blip-captions \
-    --epochs 500 \
-    --batch-size 16
-```
-
-**Why use 200+ epochs for Flickr8k?**
-- Smaller dataset (8K vs typical 100K+) requires more iterations
-- High-quality captions enable effective learning even with fewer images
-- Each image has 5 captions = 40K effective training pairs
-- 32×32 resolution is simpler to learn than higher resolutions
-
-**Dataset Comparison:**
-
-| Dataset | Images | Effective Pairs | Training Time | Status |
-| :--- | :---: | :---: | :---: | :---: |
-| **Flickr8k** ⭐ | 8K | 40K | 4-8 hours | ✅ Ready to use |
-| **Pokemon BLIP** 🎮 | 833 | 833 | 30-60 min | ✅ Ready to use |
-| **CC3M** 🌐 | 3.3M | 3.3M | 1-2 days | ⚠️ Requires img2dataset download |
-
-See the **Dataset** section above for detailed analysis of why Flickr8k is sufficient for 32×32 pretrain.
-
-**Stage 2: Fine-tuning**
-```bash
-# Default: Emoji-32 dataset with pretrained checkpoint
-uv run main.py --finetune \
-    --checkpoint checkpoints/pretrain_flickr8k.pt \
-    --epochs 100 \
-    --batch-size 16
-
-# Override hyperparameters
-uv run main.py --finetune \
-    --checkpoint checkpoints/pretrain_flickr8k.pt \
-    --epochs 200 \
-    --batch-size 16 \
-    --learning-rate 1e-5
-
-# Use custom dataset
-uv run main.py --finetune \
-    --dataset user/my-emoji-dataset \
-    --checkpoint checkpoints/pretrain_flickr8k.pt
-```
-
-### Training Arguments
-
-| Argument | Description | Default |
-| :--- | :--- | :--- |
-| `--epochs` | Number of training epochs | config default |
-| `--batch-size` | Batch size | config default |
-| `--learning-rate` | Learning rate | config default |
-| `--dataset` | Dataset path or name | config default |
-| `--checkpoint` | Pretrained checkpoint path (finetune only) | config default |
-| `--wandb` | Enable wandb logging | disabled |
-| `--wandb-project` | Wandb project name | text-to-emoji |
-| `--wandb-run-name` | Wandb run name | auto-generated |
-
-### Weights & Biases Logging
-
-Enable experiment tracking with [Weights & Biases](https://wandb.ai):
-
-```bash
-# Basic usage
-uv run main.py --pretrain --wandb
-
-# With custom project and run name
-uv run main.py --pretrain --wandb --wandb-project my-project --wandb-run-name exp-1
-
-# Fine-tuning with wandb
-uv run main.py --finetune --checkpoint checkpoints/pretrain.pt --wandb
-```
-
-**Logged Metrics:**
-
-| Metric | Description | Frequency |
-| :--- | :--- | :--- |
-| `train/loss` | Training loss | Every step |
-| `train/learning_rate` | Current learning rate | Every step |
-| `train/global_step` | Global step counter | Every step |
-| `epoch/avg_loss` | Average epoch loss | Every epoch |
-| `epoch/epoch` | Current epoch | Every epoch |
-| `epoch/cfg_probability` | CFG dropout probability | Every epoch |
-
-### Generating Images
-
-```bash
-# Single prompt
-uv run main.py --generate --prompt "a cute robot"
-
-# Multiple prompts (comma-separated)
-uv run main.py --generate --prompt "rocket,cat,ghost"
-
-# With custom checkpoint
-uv run main.py --generate --prompt "star" --checkpoint checkpoints/model_best.pt
-
-# Multiple samples
-uv run main.py --generate --prompt "heart" --num-samples 4
-
-# Custom sampling steps
-uv run main.py --generate --prompt "fire" --steps 100
-```
-
-**Generation Arguments**:
-
-| Argument | Description | Default |
-| :--- | :--- | :--- |
-| `--prompt` | Text description | required |
-| `--checkpoint` | Model checkpoint path | checkpoints/model_best.pt |
-| `--num-samples` | Number of images to generate | 1 |
-| `--steps` | Diffusion sampling steps | 50 |
-| `--guidance` | CFG scale | 7.5 |
-| `--seed` | Random seed | None |
-
-## 🛠️ Configuration
-
-All configuration is managed via `config.yaml`. Edit this file to change training/generation settings:
-
-```yaml
-# config.yaml
-
-# Training stage: "pretrain" or "finetune"
-training_stage: pretrain
-
-# Model type: "dit" (standard DiT) or "mmdit" (Multi-Modal DiT from SD3)
-model_type: mmdit
-
-# Pretraining Settings (Stage 1)
-pretrain:
-  data_source: cifar100
-  epochs: 200
-  batch_size: 4
-  learning_rate: 1.0e-4
-  ...
-
-# Fine-tuning Settings (Stage 2)
-finetune:
-  data_source: huggingface
-  dataset_name: junyeong-nero/emoji-32
-  epochs: 100
-  ...
-
-# Common Settings (shared by both stages)
-common:
-  model_size: S
-  patch_size: 2
-  guidance_scale: 7.5
-  use_ema: true
-
-  # MMDiT-specific settings (only used when model_type: mmdit)
-  qk_rmsnorm: true          # RMSNorm for QK attention (SD3-style)
-  register_tokens: 0        # Register tokens (0 or 4)
-```
-
-**CLI overrides config.yaml settings:**
-```bash
-# Override any config value
-uv run main.py --pretrain --epochs 50 --batch-size 32 --learning-rate 1e-4
-uv run main.py --finetune --checkpoint checkpoints/pretrain.pt --epochs 200
-```
-
-## 📁 Project Structure
-
-```
-text-to-emoji/
-├── main.py                 # Main entry point with CLI arguments
-├── config.yaml            # Configuration file (pretrain/finetune/common settings)
-├── src/
-│   ├── config.py          # Configuration classes
-│   ├── data/
-│   │   ├── dataset.py     # Dataset loaders (emoji, CIFAR-100)
-│   │   └── loader.py      # Data loading utilities
-│   ├── models/
-│   │   ├── diffusion.py   # Diffusion process
-│   │   ├── factory.py     # Model factory (DiT/MMDiT)
-│   │   ├── vanilla_dit.py # Standard DiT implementation
-│   │   └── mmdit.py       # MMDiT implementation (SD3)
-│   ├── text_encoder/
-│   │   └── clip_encoder.py # CLIP text encoder
-│   ├── training/
-│   │   ├── train.py       # Training script
-│   │   ├── ema.py         # Exponential Moving Average
-│   │   └── checkpoint.py  # Checkpoint saving/loading
-│   └── inference/
-│       └── generate.py    # Generation script
-├── scripts/
-│   ├── install.sh         # Installation script
-│   ├── train-pretrain.sh  # Pretraining script
-│   └── train-finetune.sh  # Fine-tuning script
-├── checkpoints/           # Saved model checkpoints
-├── samples/               # Generated samples
-└── AGENTS.md             # Developer guide
-```
-
-## 🖼️ Results
-
-Generated images are native 32×32 pixels. For display, they're upscaled using nearest-neighbor interpolation.
-
-| Prompt | Result |
-| :--- | :---: |
-| **"rocket"** | <img src="assets/sample_rocket.png" width="100"> |
-| **"cat"** | <img src="assets/sample_cat.png" width="100"> |
-| **"robot"** | <img src="assets/sample_robot.png" width="100"> |
-
-*(Add your generated images to the `assets/` folder)*
-
-## 🔧 Development
-
-### Code Quality
-
-```bash
-# Check code style
-uv run ruff check src/
-
-# Format code
-uv run black src/
-
-# Type checking
-uv run mypy src/
-```
-
-### Running Tests
-
-```bash
-uv run pytest tests/
-```
-
-## 📚 References
-
-- **DiT**: "Scalable Diffusion Models with Transformers" - Google Research (2023)
-  - Paper: [https://arxiv.org/abs/2212.09748](https://arxiv.org/abs/2212.09748)
-- **MMDiT**: "Scaling Rectified Flow Transformers for High-Resolution Image Synthesis" - Stability AI (2024)
-  - Paper: [https://arxiv.org/abs/2403.03206](https://arxiv.org/abs/2403.03206)
-  - Implementation: [lucidrains/mmdit](https://github.com/lucidrains/mmdit)
-- **Vision Transformers Need Registers**: "Vision Transformers Need Registers" - Meta AI (2023)
-  - Paper: [https://arxiv.org/abs/2309.16588](https://arxiv.org/abs/2309.16588)
-- **DDPM**: Ho et al., "Denoising Diffusion Probabilistic Models" (2020)
-- **DDIM**: Song et al., "Denoising Diffusion Implicit Models" (2020)
-- **CFG**: Ho et al., "Classifier-Free Diffusion Guidance" (2021)
-- **CLIP**: Radford et al., "Learning Transferable Visual Models From Natural Language Supervision" (2021)
-
-## 📄 License
-
-MIT License - See LICENSE file for details.
+프롬프트를 입력하면 실시간으로 이미지를 생성합니다.
 
 ---
 
-**Note**: Generated images are native 32×32 pixels. For display, they're upscaled to larger sizes using nearest-neighbor interpolation to preserve the pixel art aesthetic.
+## Configuration
+
+모든 설정은 `config.yaml`에서 관리됩니다:
+
+```yaml
+# tiny-stable-diffusion Configuration
+
+# 현재 학습 단계: "vae_train" 또는 "diffusion_train"
+training_stage: vae_train
+
+# Diffusion 모델 타입: "dit" 또는 "mmdit"
+model_type: mmdit
+
+# ═══════════════════════════════════════════════════════════════
+# Stage 1: VAE Training
+# ═══════════════════════════════════════════════════════════════
+vae_train:
+    data_source: caption
+    dataset_name: jxie/flickr8k
+    image_size: 64
+    latent_channels: 16
+    vae_ch: 64
+    vae_ch_mult: [1, 2, 4, 4]
+    kl_weight: 1.0e-6
+    epochs: 100
+    batch_size: 32
+    learning_rate: 1.0e-4
+    checkpoint_path: checkpoints/vae.pt
+
+# ═══════════════════════════════════════════════════════════════
+# Stage 2: Diffusion Training
+# ═══════════════════════════════════════════════════════════════
+diffusion_train:
+    data_source: caption
+    dataset_name: jxie/flickr8k
+    image_size: 64
+    latent_size: 8
+    in_channels: 16
+    initial_cfg_prob: 0.0
+    final_cfg_prob: 0.1
+    cfg_warmup_epochs: 10
+    vae_checkpoint: checkpoints/vae.pt
+    epochs: 200
+    batch_size: 32
+    learning_rate: 1.0e-4
+    checkpoint_path: checkpoints/diffusion.pt
+
+# ═══════════════════════════════════════════════════════════════
+# Common Settings
+# ═══════════════════════════════════════════════════════════════
+common:
+    model_size: S           # S, B, L, XL
+    patch_size: 2
+    num_timesteps: 1000
+    beta_schedule: cosine
+    guidance_scale: 7.5
+    use_ema: true
+    ema_decay: 0.9999
+    device: auto
+    seed: 42
+    validation_prompts:
+        - a photo of a cat
+        - a rocket flying in space
+        - a robot with blue eyes
+    validation_interval: 10
+```
+
+---
+
+## Dataset
+
+### 권장 데이터셋
+
+| 데이터셋 | 크기 | 특징 | 용도 |
+|---------|------|------|------|
+| **jxie/flickr8k** | 8K images | 이미지당 5개 캡션, 고품질 | 권장 |
+| reach-vb/pokemon-blip-captions | 833 images | 픽셀아트 스타일 | 빠른 테스트 |
+
+### 데이터셋 변경
+
+```bash
+# CLI로 변경
+uv run main.py --train-vae --dataset jxie/flickr8k
+
+# 또는 config.yaml 수정
+vae_train:
+    dataset_name: jxie/flickr8k
+```
+
+---
+
+## Project Structure
+
+```
+tiny-stable-diffusion/
+├── main.py                         # CLI 진입점
+├── config.yaml                     # 설정 파일
+├── pyproject.toml                  # 프로젝트 메타데이터
+├── README.md                       # 이 문서
+│
+├── src/
+│   ├── models/
+│   │   ├── vae.py                  # VAE (AutoencoderKL)
+│   │   │   ├── Encoder             # 이미지 → latent
+│   │   │   ├── Decoder             # latent → 이미지
+│   │   │   └── training_loss()     # VAE 손실 함수
+│   │   │
+│   │   ├── diffusion.py            # DDPM/DDIM 프로세스
+│   │   │   ├── q_sample()          # forward diffusion
+│   │   │   ├── p_sample()          # reverse (DDPM)
+│   │   │   ├── ddim_sample()       # reverse (DDIM)
+│   │   │   └── sample()            # 전체 생성 루프
+│   │   │
+│   │   ├── factory.py              # DiT 모델 팩토리
+│   │   ├── vanilla_dit.py          # 표준 DiT 구현
+│   │   ├── mmdit.py                # Multi-Modal DiT (SD3)
+│   │   └── layers.py               # 공통 레이어
+│   │
+│   ├── training/
+│   │   ├── vae_trainer.py          # VAE 학습 루프
+│   │   ├── trainer.py              # Diffusion 학습 루프
+│   │   ├── ema.py                  # Exponential Moving Average
+│   │   └── checkpoint.py           # 체크포인트 관리
+│   │
+│   ├── inference/
+│   │   └── generator.py            # 이미지 생성
+│   │
+│   ├── text_encoder/
+│   │   └── clip_encoder.py         # CLIP 텍스트 인코더
+│   │
+│   ├── data/
+│   │   ├── dataset.py              # 데이터셋 로더
+│   │   └── loader.py               # DataLoader 유틸리티
+│   │
+│   ├── config/
+│   │   ├── loader.py               # config.yaml 로더
+│   │   └── dataclasses.py          # 설정 데이터클래스
+│   │
+│   └── utils/
+│       └── common.py               # 공통 유틸리티
+│
+├── checkpoints/                    # 저장된 모델
+│   ├── vae.pt                      # VAE 체크포인트
+│   └── diffusion.pt                # Diffusion 체크포인트
+│
+├── samples/                        # 생성된 샘플
+│   ├── vae_epoch_N/                # VAE reconstruction
+│   └── epoch_N/                    # Diffusion 생성 결과
+│
+└── tests/                          # 테스트 코드
+```
+
+---
+
+## CLI Reference
+
+```
+usage: main.py [-h] [--train-vae] [--train-diffusion] [--train]
+               [--generate] [--demo] [options]
+
+tiny-stable-diffusion - Stable Diffusion 3 from Scratch
+
+Training:
+  --train-vae           Stage 1: VAE 학습
+  --train-diffusion     Stage 2: Diffusion 학습 (VAE 필요)
+  --train               config.yaml의 training_stage 사용
+
+  --epochs N            에포크 수
+  --batch-size N        배치 크기
+  --learning-rate F     학습률
+  --dataset NAME        데이터셋 이름
+  --vae-checkpoint P    VAE 체크포인트 경로
+
+Generation:
+  --generate            이미지 생성
+  --demo                인터랙티브 데모
+
+  --prompt TEXT         프롬프트 (쉼표로 구분)
+  --num-samples N       프롬프트당 샘플 수
+  --steps N             diffusion 스텝 (default: 50)
+  --guidance F          CFG 스케일 (default: 7.5)
+  --seed N              랜덤 시드
+  --checkpoint P        Diffusion 체크포인트
+  --output PATH         출력 파일 경로
+
+Logging:
+  --wandb               Wandb 로깅 활성화
+  --wandb-project NAME  Wandb 프로젝트 이름
+  --wandb-run-name NAME Wandb 런 이름
+```
+
+---
+
+## Technical Details
+
+### Diffusion Process
+
+**Forward Process (노이즈 추가):**
+```
+x_t = √(α̅_t) × x_0 + √(1 - α̅_t) × ε
+```
+
+**Reverse Process (DDIM):**
+```
+x_{t-1} = √(α̅_{t-1}) × pred_x_0 + √(1 - α̅_{t-1} - σ²) × ε_θ + σ × z
+```
+
+**Min-SNR Weighting:**
+```python
+snr = α̅_t / (1 - α̅_t)
+weight = min(snr, γ) / snr  # γ = 5.0
+loss = weight × MSE(ε_θ, ε)
+```
+
+### Classifier-Free Guidance (CFG)
+
+```python
+# 학습 시: 10% 확률로 텍스트 조건 드롭
+if random() < 0.1:
+    text_embed = uncond_embed  # 빈 문자열 임베딩
+
+# 추론 시: conditional과 unconditional 예측 결합
+noise_pred = uncond_pred + guidance_scale × (cond_pred - uncond_pred)
+```
+
+---
+
+## References
+
+- **Stable Diffusion 3**: [Scaling Rectified Flow Transformers for High-Resolution Image Synthesis](https://arxiv.org/abs/2403.03206)
+- **DiT**: [Scalable Diffusion Models with Transformers](https://arxiv.org/abs/2212.09748)
+- **DDPM**: [Denoising Diffusion Probabilistic Models](https://arxiv.org/abs/2006.11239)
+- **DDIM**: [Denoising Diffusion Implicit Models](https://arxiv.org/abs/2010.02502)
+- **VAE**: [Auto-Encoding Variational Bayes](https://arxiv.org/abs/1312.6114)
+- **CLIP**: [Learning Transferable Visual Models From Natural Language Supervision](https://arxiv.org/abs/2103.00020)
+- **Min-SNR**: [Efficient Diffusion Training via Min-SNR Weighting Strategy](https://arxiv.org/abs/2303.09556)
+
+---
+
+## License
+
+MIT License - See [LICENSE](LICENSE) for details.
+
+---
+
+## Contributing
+
+이슈와 PR을 환영합니다. 교육 목적의 프로젝트이므로 코드의 명확성과 이해하기 쉬운 구현을 중시합니다.

@@ -1,3 +1,13 @@
+"""VAE (Variational AutoEncoder) for Stable Diffusion 3 style latent space.
+
+Implements an AutoencoderKL with:
+- 64x64 input -> 8x8 latent (f8 compression)
+- 16 latent channels (SD3 style)
+- Reconstruction + KL divergence loss
+"""
+
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -287,6 +297,95 @@ class AutoencoderKL(nn.Module):
             z = mean
         dec = self.decode(z)
         return dec, mean, logvar
+
+    def training_loss(
+        self,
+        x: torch.Tensor,
+        kl_weight: float = 1e-6,
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        """Calculate VAE training loss.
+
+        Args:
+            x: Input images (B, C, H, W) normalized to [-1, 1]
+            kl_weight: Weight for KL divergence loss (beta-VAE style)
+
+        Returns:
+            Tuple of (total_loss, loss_dict with individual components)
+        """
+        # Forward pass
+        reconstruction, mean, logvar = self.forward(x, sample_posterior=True)
+
+        # Reconstruction loss (MSE)
+        recon_loss = F.mse_loss(reconstruction, x, reduction="mean")
+
+        # KL divergence loss
+        # KL(q(z|x) || p(z)) = -0.5 * sum(1 + logvar - mean^2 - exp(logvar))
+        kl_loss = -0.5 * torch.mean(1 + logvar - mean.pow(2) - logvar.exp())
+
+        # Total loss
+        total_loss = recon_loss + kl_weight * kl_loss
+
+        loss_dict = {
+            "total_loss": total_loss.item(),
+            "recon_loss": recon_loss.item(),
+            "kl_loss": kl_loss.item(),
+        }
+
+        return total_loss, loss_dict
+
+    @torch.no_grad()
+    def encode_to_latent(self, x: torch.Tensor) -> torch.Tensor:
+        """Encode images to latent space (for diffusion training).
+
+        Uses mean (deterministic) encoding for stable diffusion training.
+
+        Args:
+            x: Input images (B, C, H, W) normalized to [-1, 1]
+
+        Returns:
+            Latent tensor (B, z_channels, H/8, W/8)
+        """
+        mean, _ = self.encode(x)
+        return mean
+
+    @torch.no_grad()
+    def decode_from_latent(self, z: torch.Tensor) -> torch.Tensor:
+        """Decode latent to images (for generation).
+
+        Args:
+            z: Latent tensor (B, z_channels, H/8, W/8)
+
+        Returns:
+            Decoded images (B, C, H, W) in [-1, 1]
+        """
+        return self.decode(z)
+
+
+def create_vae(
+    image_size: int = 64,
+    z_channels: int = 16,
+    ch: int = 64,
+    ch_mult: tuple[int, ...] = (1, 2, 4, 4),
+) -> AutoencoderKL:
+    """Create a VAE model optimized for the given image size.
+
+    Args:
+        image_size: Input image size (64 recommended)
+        z_channels: Latent channels (16 for SD3 style)
+        ch: Base channel count (64 for lightweight)
+        ch_mult: Channel multipliers for each resolution level
+
+    Returns:
+        AutoencoderKL model
+    """
+    return AutoencoderKL(
+        in_channels=3,
+        out_channels=3,
+        z_channels=z_channels,
+        ch=ch,
+        ch_mult=ch_mult,
+        num_res_blocks=2,
+    )
 
 
 # ------------------------------------------------------------------------------

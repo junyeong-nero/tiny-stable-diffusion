@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "text-to-emoji"
-version = "0.1.0"
-description = "Text-to-Pixel Art Generator using Diffusion Transformer (DiT) with CLIP conditioning"
+name = "tiny-stable-diffusion"
+version = "0.2.0"
+description = "Stable Diffusion 3 from Scratch - A minimal educational implementation with VAE + Latent Diffusion"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -13,13 +13,13 @@ authors = [
     { name = "Your Name", email = "your.email@example.com" }
 ]
 keywords = [
-    "diffusion",
-    "transformer",
-    "pixel-art",
-    "emoji",
+    "stable-diffusion",
+    "vae",
+    "latent-diffusion",
+    "diffusion-transformer",
+    "dit",
     "text-to-image",
     "generative-ai",
-    "machine-learning",
     "deep-learning",
 ]
 classifiers = [
@@ -62,13 +62,14 @@ dev = [
 ]
 
 [project.scripts]
-text-to-emoji-train = "src.training.train:main"
-text-to-emoji-generate = "src.inference.generate:main"
+tiny-sd-train-vae = "main:_run_vae_training"
+tiny-sd-train-diffusion = "main:_run_diffusion_training"
+tiny-sd-generate = "main:_run_generation"
 
 [project.urls]
-Homepage = "https://github.com/your-username/text-to-emoji"
-Repository = "https://github.com/your-username/text-to-emoji"
-Issues = "https://github.com/your-username/text-to-emoji/issues"
+Homepage = "https://github.com/your-username/tiny-stable-diffusion"
+Repository = "https://github.com/your-username/tiny-stable-diffusion"
+Issues = "https://github.com/your-username/tiny-stable-diffusion/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/"]

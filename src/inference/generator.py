@@ -1,4 +1,10 @@
-"""Image generation utilities for text-to-emoji."""
+"""Image generation utilities for tiny-stable-diffusion.
+
+Implements latent-space generation (Stable Diffusion 3 style):
+1. Sample noise in latent space
+2. Denoise using DiT model
+3. Decode latent to image using VAE decoder
+"""
 
 from __future__ import annotations
 
@@ -9,6 +15,7 @@ from PIL import Image
 
 from src.models.diffusion import Diffusion
 from src.models.factory import DiT
+from src.models.vae import create_vae
 from src.text_encoder.clip_encoder import CLIPTextEncoder
 from src.training.checkpoint import find_latest_checkpoint
 from src.utils.common import get_device, set_seed
@@ -18,17 +25,19 @@ from src.utils.common import get_device, set_seed
 def generate(
     prompts: list[str],
     checkpoint: str | Path | None = None,
+    vae_checkpoint: str | Path | None = None,
     num_samples: int = 1,
     num_steps: int = 50,
     guidance_scale: float = 7.5,
     seed: int | None = None,
     device: str = "auto",
 ) -> list[Image.Image]:
-    """Generate images from text prompts.
+    """Generate images from text prompts using latent-space diffusion.
 
     Args:
         prompts: List of text prompts
-        checkpoint: Path to model checkpoint (auto-detects if None)
+        checkpoint: Path to diffusion model checkpoint
+        vae_checkpoint: Path to VAE checkpoint
         num_samples: Number of samples per prompt
         num_steps: Number of diffusion steps
         guidance_scale: Classifier-free guidance scale
@@ -55,30 +64,58 @@ def generate(
         uncond_embed = clip_encoder.encode([""])
     uncond_embed = uncond_embed.to(device)
 
-    # Find checkpoint
+    # Find diffusion checkpoint
     if checkpoint is None:
-        checkpoint = find_latest_checkpoint("checkpoints")
+        checkpoint = find_latest_checkpoint("checkpoints", prefix="diffusion")
         if checkpoint is None:
-            raise FileNotFoundError("No checkpoint found. Train the model first.")
-        print(f"Using latest checkpoint: {checkpoint}")
-    else:
-        checkpoint = Path(checkpoint)
+            checkpoint = Path("checkpoints/diffusion.pt")
+    checkpoint = Path(checkpoint)
 
-    print(f"Loading checkpoint: {checkpoint}")
+    if not checkpoint.exists():
+        raise FileNotFoundError(f"Diffusion checkpoint not found: {checkpoint}")
+
+    print(f"Loading diffusion checkpoint: {checkpoint}")
     ckpt = torch.load(checkpoint, map_location=device)
 
-    model_config = ckpt.get("model_config", {})
+    model_config = ckpt.get("model_config", ckpt.get("config", {}))
     model_size = model_config.get("model_size", "S")
     patch_size = model_config.get("patch_size", 2)
-    image_size = model_config.get("image_size", 32)
     model_type = model_config.get("model_type", "dit")
     qk_rmsnorm = model_config.get("qk_rmsnorm", True)
     register_tokens = model_config.get("register_tokens", 0)
+    latent_size = model_config.get("latent_size", 8)
+    in_channels = model_config.get("in_channels", 16)
+    image_size = model_config.get("image_size", 64)
 
-    print(f"Initializing DiT-{model_size} ({model_type})...")
-    model = DiT(
-        in_channels=3,
+    # Find VAE checkpoint
+    if vae_checkpoint is None:
+        vae_checkpoint = model_config.get("vae_checkpoint", "checkpoints/vae.pt")
+    vae_checkpoint = Path(vae_checkpoint)
+
+    if not vae_checkpoint.exists():
+        raise FileNotFoundError(f"VAE checkpoint not found: {vae_checkpoint}")
+
+    # Load VAE
+    print(f"Loading VAE from {vae_checkpoint}...")
+    vae = create_vae(
         image_size=image_size,
+        z_channels=in_channels,
+        ch=model_config.get("vae_ch", 64),
+        ch_mult=tuple(model_config.get("vae_ch_mult", [1, 2, 4, 4])),
+    )
+    vae_state = torch.load(vae_checkpoint, map_location=device)
+    vae.load_state_dict(vae_state["model_state_dict"])
+    vae = vae.to(device)
+    vae.eval()
+
+    # Load DiT model
+    print(f"Initializing DiT-{model_size} ({model_type}) for latent space...")
+    print(f"  Latent size: {latent_size}x{latent_size}")
+    print(f"  Latent channels: {in_channels}")
+
+    model = DiT(
+        in_channels=in_channels,
+        image_size=latent_size,
         patch_size=patch_size,
         model_size=model_size,
         clip_embed_dim=clip_encoder.embedding_dim,
@@ -107,17 +144,19 @@ def generate(
         text_embeds = clip_encoder.encode([prompt] * num_samples)
         text_embeds = text_embeds.to(device)
 
+        # Sample in latent space, decode to image
         images = diffusion.sample(
             model=model,
-            shape=(num_samples, 3, image_size, image_size),
+            shape=(num_samples, in_channels, latent_size, latent_size),
             text_embeds=text_embeds,
             num_steps=num_steps,
             use_ddim=True,
             use_cfg=True,
+            vae_decoder=vae,
         )
 
         for img in images:
-            img = (img + 1) / 2  # Denormalize
+            # images are already in [0, 1] after sample()
             img = img.permute(1, 2, 0).mul(255).clamp(0, 255).to(torch.uint8).cpu().numpy()
             pil_img = Image.fromarray(img)
             all_images.append(pil_img)
@@ -126,26 +165,32 @@ def generate(
     return all_images
 
 
-def demo(checkpoint: str | Path | None = None) -> None:
+def demo(
+    checkpoint: str | Path | None = None,
+    vae_checkpoint: str | Path | None = None,
+) -> None:
     """Interactive demo mode.
 
     Args:
-        checkpoint: Path to model checkpoint (uses default if None)
+        checkpoint: Path to diffusion checkpoint
+        vae_checkpoint: Path to VAE checkpoint
     """
     print("=" * 60)
-    print("text-to-emoji Interactive Demo")
+    print("tiny-stable-diffusion Interactive Demo")
     print("=" * 60)
     print("\nEnter prompts to generate images. Type 'quit' to exit.\n")
 
-    # Find checkpoint
+    # Find checkpoints
     if checkpoint is None:
-        checkpoint = find_latest_checkpoint("checkpoints")
+        checkpoint = find_latest_checkpoint("checkpoints", prefix="diffusion")
         if checkpoint is None:
-            checkpoint = Path("checkpoints/model_best.pt")
+            checkpoint = Path("checkpoints/diffusion.pt")
 
     if not Path(checkpoint).exists():
-        print(f"Error: Checkpoint not found: {checkpoint}")
-        print("Please train the model first: python main.py --train")
+        print(f"Error: Diffusion checkpoint not found: {checkpoint}")
+        print("Please train the model first:")
+        print("  1. python main.py --train-vae")
+        print("  2. python main.py --train-diffusion")
         return
 
     device = get_device("auto")
@@ -161,14 +206,39 @@ def demo(checkpoint: str | Path | None = None) -> None:
         uncond_embed = clip_encoder.encode([""])
     uncond_embed = uncond_embed.to(device)
 
-    # Load checkpoint
+    # Load diffusion checkpoint
     ckpt = torch.load(checkpoint, map_location=device)
-    model_config = ckpt.get("model_config", {})
+    model_config = ckpt.get("model_config", ckpt.get("config", {}))
 
+    latent_size = model_config.get("latent_size", 8)
+    in_channels = model_config.get("in_channels", 16)
+    image_size = model_config.get("image_size", 64)
+
+    # Find VAE checkpoint
+    if vae_checkpoint is None:
+        vae_checkpoint = model_config.get("vae_checkpoint", "checkpoints/vae.pt")
+
+    if not Path(vae_checkpoint).exists():
+        print(f"Error: VAE checkpoint not found: {vae_checkpoint}")
+        return
+
+    # Load VAE
+    vae = create_vae(
+        image_size=image_size,
+        z_channels=in_channels,
+        ch=model_config.get("vae_ch", 64),
+        ch_mult=tuple(model_config.get("vae_ch_mult", [1, 2, 4, 4])),
+    )
+    vae_state = torch.load(vae_checkpoint, map_location=device)
+    vae.load_state_dict(vae_state["model_state_dict"])
+    vae = vae.to(device)
+    vae.eval()
+
+    # Load DiT model
     model = DiT(
-        in_channels=3,
-        image_size=32,
-        patch_size=2,
+        in_channels=in_channels,
+        image_size=latent_size,
+        patch_size=model_config.get("patch_size", 2),
         model_size=model_config.get("model_size", "S"),
         clip_embed_dim=clip_encoder.embedding_dim,
         model_type=model_config.get("model_type", "dit"),
@@ -186,6 +256,8 @@ def demo(checkpoint: str | Path | None = None) -> None:
         uncond_embed=uncond_embed,
     )
 
+    print(f"Model loaded. Generating {image_size}x{image_size} images.")
+
     while True:
         try:
             prompt = input("\nEnter prompt (or 'quit'): ").strip()
@@ -200,15 +272,15 @@ def demo(checkpoint: str | Path | None = None) -> None:
 
             images = diffusion.sample(
                 model=model,
-                shape=(1, 3, 32, 32),
+                shape=(1, in_channels, latent_size, latent_size),
                 text_embeds=text_embeds,
                 num_steps=50,
                 use_ddim=True,
                 use_cfg=True,
+                vae_decoder=vae,
             )
 
             img = images[0]
-            img = (img + 1) / 2
             img = img.permute(1, 2, 0).mul(255).clamp(0, 255).to(torch.uint8).cpu().numpy()
             pil_img = Image.fromarray(img)
 

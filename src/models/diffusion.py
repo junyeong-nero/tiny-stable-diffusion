@@ -4,15 +4,22 @@ Implements the diffusion process following:
 - DDPM: Ho et al., "Denoising Diffusion Probabilistic Models" (2020)
 - DDIM: Song et al., "Denoising Diffusion Implicit Models" (2020)
 - CFG: Ho et al., "Classifier-Free Diffusion Guidance" (2021)
+
+For Stable Diffusion 3 style latent-space diffusion:
+- Diffusion operates on latent tensors (B, 16, 8, 8)
+- VAE decoder converts latent to image after sampling
 """
 
 from __future__ import annotations
 
 import math
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import torch
 import torch.nn as nn
+
+if TYPE_CHECKING:
+    from src.models.vae import AutoencoderKL
 
 
 class Diffusion:
@@ -262,21 +269,27 @@ class Diffusion:
         use_ddim: bool = True,
         use_cfg: bool = True,
         seed: int | None = None,
+        vae_decoder: "AutoencoderKL | None" = None,
     ) -> torch.Tensor:
         """Generate samples from diffusion model.
 
+        For latent-space diffusion (SD3 style):
+            - shape should be (B, latent_channels, latent_h, latent_w)
+            - Pass vae_decoder to convert latent to image
+
         Args:
             model: Diffusion model
-            shape: Output shape (B, C, H, W)
+            shape: Output shape (B, C, H, W) - latent shape if using VAE
             text_embeds: Text embeddings (B, D)
             num_steps: Number of sampling steps
             eta: DDIM stochasticity parameter
             use_ddim: Use DDIM (True) or DDPM (False)
             use_cfg: Use classifier-free guidance
             seed: Random seed
+            vae_decoder: Optional VAE decoder for latent-to-image conversion
 
         Returns:
-            Generated images (B, C, H, W)
+            Generated images (B, C, H, W) normalized to [0, 1]
         """
         if seed is not None:
             torch.manual_seed(seed)
@@ -314,6 +327,10 @@ class Diffusion:
                 )
             else:
                 x_t = self.p_sample(model, x_t, t_batch, text_embeds, use_cfg=use_cfg)
+
+        # Decode latent to image if VAE decoder provided
+        if vae_decoder is not None:
+            x_t = vae_decoder.decode_from_latent(x_t)
 
         # Normalize to [0, 1]
         x_t = (x_t + 1.0) / 2.0

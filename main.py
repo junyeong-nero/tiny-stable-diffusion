@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""text-to-emoji - Text-to-Emoji Generator.
+"""tiny-stable-diffusion - Stable Diffusion 3 from Scratch.
 
-A diffusion transformer model for generating emoji images from text prompts.
+A minimal implementation of Stable Diffusion 3 pipeline for educational purposes.
+Implements the complete SD3 training pipeline:
+1. VAE training (image compression to latent space)
+2. Diffusion training (on latent space)
+3. Image generation
 
 Usage:
-    python main.py --train          # Train the model
-    python main.py --pretrain       # Pretrain on CIFAR-100
-    python main.py --finetune       # Fine-tune on emoji dataset
-    python main.py --generate       # Generate images
-    python main.py --demo           # Interactive demo
+    python main.py --train-vae        # Stage 1: Train VAE
+    python main.py --train-diffusion  # Stage 2: Train Diffusion (requires VAE)
+    python main.py --generate         # Generate images
+    python main.py --demo             # Interactive demo
 """
 
 from __future__ import annotations
@@ -22,13 +25,13 @@ from src.config import get_config, get_training_stage
 def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="text-to-emoji - Text-to-Pixel Art Generator",
+        description="tiny-stable-diffusion - Stable Diffusion 3 from Scratch",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     # Mode arguments
-    parser.add_argument("--pretrain", action="store_true", help="Run pretraining on CIFAR-100")
-    parser.add_argument("--finetune", action="store_true", help="Run fine-tuning on emoji dataset")
+    parser.add_argument("--train-vae", action="store_true", help="Stage 1: Train VAE (encoder + decoder)")
+    parser.add_argument("--train-diffusion", action="store_true", help="Stage 2: Train Diffusion on latent space")
     parser.add_argument("--train", action="store_true", help="Train using config.yaml settings")
     parser.add_argument("--generate", action="store_true", help="Generate images from prompts")
     parser.add_argument("--demo", action="store_true", help="Run interactive demo")
@@ -36,6 +39,7 @@ def main() -> None:
     # Training arguments
     parser.add_argument("--dataset", type=str, default=None, help="Dataset path or name")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint")
+    parser.add_argument("--vae-checkpoint", type=str, default=None, help="Path to VAE checkpoint")
     parser.add_argument("--epochs", type=int, default=None, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=None, help="Batch size")
     parser.add_argument("--learning-rate", type=float, default=None, help="Learning rate")
@@ -50,20 +54,23 @@ def main() -> None:
 
     # Wandb arguments
     parser.add_argument("--wandb", action="store_true", help="Enable wandb logging")
-    parser.add_argument("--wandb-project", type=str, default="text-to-emoji", help="Wandb project")
+    parser.add_argument("--wandb-project", type=str, default="tiny-stable-diffusion", help="Wandb project")
     parser.add_argument("--wandb-run-name", type=str, default=None, help="Wandb run name")
 
     args = parser.parse_args()
 
-    if args.pretrain:
-        _run_training("pretrain", args)
+    if args.train_vae:
+        _run_vae_training(args)
 
-    elif args.finetune:
-        _run_training("finetune", args)
+    elif args.train_diffusion:
+        _run_diffusion_training(args)
 
     elif args.train:
         stage = get_training_stage()
-        _run_training(stage, args)
+        if stage == "vae_train":
+            _run_vae_training(args)
+        else:
+            _run_diffusion_training(args)
 
     elif args.generate:
         _run_generation(args)
@@ -75,11 +82,11 @@ def main() -> None:
         parser.print_help()
 
 
-def _run_training(stage: str, args: argparse.Namespace) -> None:
-    """Run training with the specified stage."""
-    from src.training.trainer import train
+def _run_vae_training(args: argparse.Namespace) -> None:
+    """Run VAE training (Stage 1)."""
+    from src.training.vae_trainer import train_vae
 
-    config = get_config(stage)
+    config = get_config("vae_train")
 
     # Override with CLI args
     if args.dataset is not None:
@@ -87,14 +94,8 @@ def _run_training(stage: str, args: argparse.Namespace) -> None:
             config["data_source"] = "local"
             config["local_dataset_path"] = args.dataset
         else:
-            config["data_source"] = "huggingface"
+            config["data_source"] = "caption"
             config["dataset_name"] = args.dataset
-
-    if args.checkpoint is not None:
-        if stage == "finetune":
-            config["pretrain_checkpoint"] = args.checkpoint
-        else:
-            config["checkpoint_path"] = args.checkpoint
 
     if args.epochs is not None:
         config["epochs"] = args.epochs
@@ -104,9 +105,40 @@ def _run_training(stage: str, args: argparse.Namespace) -> None:
         config["learning_rate"] = args.learning_rate
 
     config["wandb_project"] = args.wandb_project
-    config["wandb_run_name"] = args.wandb_run_name
+    config["wandb_run_name"] = args.wandb_run_name or "vae-training"
 
-    train(config, use_wandb=args.wandb)
+    train_vae(config, use_wandb=args.wandb)
+
+
+def _run_diffusion_training(args: argparse.Namespace) -> None:
+    """Run Diffusion training (Stage 2)."""
+    from src.training.trainer import train_diffusion
+
+    config = get_config("diffusion_train")
+
+    # Override with CLI args
+    if args.dataset is not None:
+        if Path(args.dataset).exists():
+            config["data_source"] = "local"
+            config["local_dataset_path"] = args.dataset
+        else:
+            config["data_source"] = "caption"
+            config["dataset_name"] = args.dataset
+
+    if args.vae_checkpoint is not None:
+        config["vae_checkpoint"] = args.vae_checkpoint
+
+    if args.epochs is not None:
+        config["epochs"] = args.epochs
+    if args.batch_size is not None:
+        config["batch_size"] = args.batch_size
+    if args.learning_rate is not None:
+        config["learning_rate"] = args.learning_rate
+
+    config["wandb_project"] = args.wandb_project
+    config["wandb_run_name"] = args.wandb_run_name or "diffusion-training"
+
+    train_diffusion(config, use_wandb=args.wandb)
 
 
 def _run_generation(args: argparse.Namespace) -> None:
@@ -122,6 +154,7 @@ def _run_generation(args: argparse.Namespace) -> None:
     images = generate(
         prompts=prompts,
         checkpoint=args.checkpoint,
+        vae_checkpoint=args.vae_checkpoint,
         num_samples=args.num_samples,
         num_steps=args.steps,
         guidance_scale=args.guidance,
@@ -141,7 +174,10 @@ def _run_demo(args: argparse.Namespace) -> None:
     """Run interactive demo."""
     from src.inference.generator import demo
 
-    demo(checkpoint=args.checkpoint)
+    demo(
+        checkpoint=args.checkpoint,
+        vae_checkpoint=args.vae_checkpoint,
+    )
 
 
 if __name__ == "__main__":

@@ -1,93 +1,105 @@
-# text-to-emoji Configuration File
-# Edit this file to change training/generation settings
+# tiny-stable-diffusion Configuration File
+# Stable Diffusion 3 style pipeline from scratch
 
-# Training stage: "pretrain" or "finetune"
-training_stage: pretrain
+# Training stage: "vae_train", "diffusion_train"
+training_stage: vae_train
 
-# Model type: "dit" (Diffusion Transformer) or "mmdit" (Multi-Modal DiT from SD3)
+# Model type for diffusion: "dit" (Diffusion Transformer) or "mmdit" (Multi-Modal DiT from SD3)
 model_type: mmdit
 
-# Pretraining Settings (Stage 1)
-pretrain:
-    # Data source options:
-    # - "caption": General image-caption dataset (Flickr8k, CC3M, Pokemon BLIP)
-    # - "cifar100": CIFAR-100 (not recommended for text-to-image)
+# =============================================================================
+# Stage 1: VAE Training
+# =============================================================================
+vae_train:
+    # Data source: "caption" for image-caption datasets
     data_source: caption
-
-    # Caption dataset settings (used when data_source="caption")
-    #
-    # ⚠️ NOTE: Most large-scale datasets (CC3M, CC12M, LAION) only provide image URLs,
-    # not actual images. They require separate download scripts (img2dataset).
-    #
-    # TESTED & WORKING datasets with actual images:
-    # - "jxie/flickr8k": 8K images, 5 captions per image (caption_0 to caption_4) ⭐ RECOMMENDED
-    #   Well-organized, human-written captions, images as PIL objects
-    # - "ariG23498/flickr8k": Alternative Flickr8k (captions as list)
-    # - "reach-vb/pokemon-blip-captions": 833 Pokemon, pixel-art style (very small)
-    #
-    # For larger datasets, you'll need to:
-    # 1. Download images separately using img2dataset or similar tools
-    # 2. Use local dataset loading
-    #
-    # Given 32x32 resolution, Flickr8k (8K) is sufficient for pretrain.
-    # Each image has 5 high-quality captions = effectively 40K training pairs.
-    # During training, one caption is randomly selected per epoch for data augmentation.
-    dataset_name: jxie/flickr8k  # Best organized Flickr8k dataset
+    dataset_name: jxie/flickr8k
     image_field: image
     caption_field: caption
     streaming: false
     split: train
 
+    # Image settings
+    image_size: 64  # Input image size
+
+    # VAE architecture
+    latent_channels: 16  # SD3 style (16 channels)
+    vae_ch: 64  # Base channel count (lightweight)
+    vae_ch_mult: [1, 2, 4, 4]  # f8 compression: 64 -> 8
+
     # Training hyperparameters
-    # Note: Flickr8k (8K images) needs more epochs than larger datasets
-    # With 40K captions (5 per image), 200 epochs = sufficient coverage
+    epochs: 100
+    batch_size: 32
+    learning_rate: 1.0e-4
+    kl_weight: 1.0e-6  # Beta-VAE weight
+
+    # Checkpoint
+    checkpoint_path: checkpoints/vae.pt
+
+# =============================================================================
+# Stage 2: Diffusion Training (on latent space)
+# =============================================================================
+diffusion_train:
+    # Data source
+    data_source: caption
+    dataset_name: jxie/flickr8k
+    image_field: image
+    caption_field: caption
+    streaming: false
+    split: train
+
+    # Image and latent settings
+    image_size: 64  # Original image size
+    latent_size: 8  # Latent spatial size (64 / 8 = 8)
+    in_channels: 16  # Latent channels (matches VAE)
+
+    # Training hyperparameters
     epochs: 200
     batch_size: 32
     learning_rate: 1.0e-4
-    image_size: 32
     initial_cfg_prob: 0.0
     final_cfg_prob: 0.1
-    cfg_warmup_epochs: 1
-    checkpoint_path: checkpoints/pretrain_flickr8k.pt
+    cfg_warmup_epochs: 10
 
-# Fine-tuning Settings (Stage 2)
-finetune:
-    data_source: huggingface
-    dataset_name: junyeong-nero/emoji-32
-    epochs: 100
-    batch_size: 16
-    learning_rate: 1.0e-5
-    image_size: 32
-    cfg_prob: 0.1
-    pretrain_checkpoint: checkpoints/pretrain_cifar100.pt
-    reset_cross_attention: false
-    checkpoint_path: checkpoints/finetune_emoji.pt
+    # VAE checkpoint (required)
+    vae_checkpoint: checkpoints/vae.pt
 
-# Common Settings (shared by both stages)
+    # Checkpoint
+    checkpoint_path: checkpoints/diffusion.pt
+
+# =============================================================================
+# Common Settings
+# =============================================================================
 common:
-    # Model configuration
-    model_size: S # Options: S (30M), B (130M), L (300M), XL (675M) for DiT; ~2-3x more for MMDiT
+    # DiT/MMDiT model configuration
+    model_size: S  # Options: S (30M), B (130M), L (300M), XL (675M)
     patch_size: 2
+
+    # Diffusion settings
     num_timesteps: 1000
     beta_schedule: cosine
     guidance_scale: 7.5
+
+    # EMA (Exponential Moving Average)
     use_ema: true
     ema_decay: 0.9999
+
+    # Training settings
     mixed_precision: false
     device: auto
     seed: 42
+
+    # Validation
     validation_prompts:
-        - rocket
-        - cat
-        - robot
-        - star
-        - heart
+        - a photo of a cat
+        - a rocket flying in space
+        - a robot with blue eyes
+        - a beautiful sunset over the ocean
+        - a red sports car
     validation_interval: 10
     sample_dir: samples
     checkpoint_dir: checkpoints
 
-    # MMDiT-specific settings (only used when model_type: mmdit)
-    # qk_rmsnorm: Use RMSNorm for QK attention (recommended for SD3-style)
+    # MMDiT-specific settings
     qk_rmsnorm: true
-    # register_tokens: Number of register tokens (0 or 4, from Vision Transformers Need Registers)
     register_tokens: 0

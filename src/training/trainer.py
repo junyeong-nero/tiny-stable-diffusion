@@ -1,4 +1,10 @@
-"""Training utilities for text-to-emoji."""
+"""Training utilities for tiny-stable-diffusion.
+
+Implements latent-space diffusion training (Stable Diffusion 3 style):
+1. Load pre-trained VAE
+2. Encode images to latent space using frozen VAE encoder
+3. Train diffusion model on latent space
+"""
 
 from __future__ import annotations
 
@@ -13,6 +19,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.models.diffusion import Diffusion
+from src.models.vae import AutoencoderKL, create_vae
 from src.text_encoder.clip_encoder import CLIPTextEncoder
 from src.training.checkpoint import save_checkpoint
 from src.training.ema import EMA
@@ -30,6 +37,7 @@ def train_one_epoch(
     diffusion: Diffusion,
     dataloader: DataLoader,
     clip_encoder: CLIPTextEncoder,
+    vae_encoder: AutoencoderKL,
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
     device: torch.device,
@@ -39,13 +47,14 @@ def train_one_epoch(
     use_wandb: bool = False,
     global_step: int = 0,
 ) -> tuple[float, int]:
-    """Train for one epoch.
+    """Train for one epoch on latent space.
 
     Args:
-        model: Model to train
+        model: Diffusion model (operates on latent space)
         diffusion: Diffusion process
         dataloader: Training data loader
         clip_encoder: CLIP text encoder
+        vae_encoder: Frozen VAE encoder for image-to-latent conversion
         optimizer: Optimizer
         scheduler: Learning rate scheduler
         device: Device to train on
@@ -59,6 +68,7 @@ def train_one_epoch(
         Tuple of (average loss, updated global step)
     """
     model.train()
+    vae_encoder.eval()  # VAE is always frozen
     epoch_loss = 0.0
 
     progress_bar = tqdm(dataloader, desc="Training")
@@ -67,14 +77,17 @@ def train_one_epoch(
         images = batch["image"].to(device)
         captions = batch["caption"]
 
+        # Encode images to latent space using frozen VAE
         with torch.no_grad():
+            latents = vae_encoder.encode_to_latent(images)
             text_embeds = clip_encoder.encode(captions)
             text_embeds = text_embeds.to(device)
 
+        # Sample random timesteps
         timesteps = torch.randint(
             0,
             diffusion.num_timesteps,
-            (images.shape[0],),
+            (latents.shape[0],),
             device=device,
         )
 
@@ -82,14 +95,14 @@ def train_one_epoch(
 
         if use_amp and device.type == "cuda":
             with torch.cuda.amp.autocast():
-                loss = diffusion.training_loss(model, images, timesteps, text_embeds)
+                loss = diffusion.training_loss(model, latents, timesteps, text_embeds)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
         else:
-            loss = diffusion.training_loss(model, images, timesteps, text_embeds)
+            loss = diffusion.training_loss(model, latents, timesteps, text_embeds)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -123,24 +136,28 @@ def generate_samples(
     model: nn.Module,
     diffusion: Diffusion,
     clip_encoder: CLIPTextEncoder,
+    vae_decoder: AutoencoderKL,
     prompts: list[str],
     device: torch.device,
     guidance_scale: float = 7.5,
-    image_size: int = 32,
+    latent_size: int = 8,
+    latent_channels: int = 16,
 ) -> torch.Tensor:
-    """Generate validation samples.
+    """Generate validation samples using latent-space diffusion.
 
     Args:
-        model: Model to use for generation
+        model: Diffusion model
         diffusion: Diffusion process
         clip_encoder: CLIP text encoder
+        vae_decoder: VAE decoder for latent-to-image conversion
         prompts: List of text prompts
         device: Device to generate on
         guidance_scale: CFG guidance scale
-        image_size: Output image size
+        latent_size: Latent spatial size
+        latent_channels: Latent channels
 
     Returns:
-        Generated images tensor
+        Generated images tensor (B, 3, H, W) in [0, 1]
     """
     model.eval()
 
@@ -150,21 +167,23 @@ def generate_samples(
     original_scale = diffusion.guidance_scale
     diffusion.guidance_scale = guidance_scale
 
+    # Sample in latent space, decode to image
     images = diffusion.sample(
         model=model,
-        shape=(len(prompts), 3, image_size, image_size),
+        shape=(len(prompts), latent_channels, latent_size, latent_size),
         text_embeds=text_embeds,
         num_steps=50,
         use_ddim=True,
         use_cfg=True,
+        vae_decoder=vae_decoder,
     )
 
     diffusion.guidance_scale = original_scale
     return images
 
 
-def train(config: dict[str, Any], use_wandb: bool = False) -> None:
-    """Main training function.
+def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
+    """Main diffusion training function (latent-space).
 
     Args:
         config: Training configuration dictionary
@@ -174,15 +193,9 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
     from src.models.factory import DiT
     from src.utils.common import get_device, set_seed
 
-    training_stage = config.get("training_stage", "pretrain")
-    if training_stage == "pretrain":
-        print("=" * 60)
-        print("STAGE 1: PRETRAINING")
-        print("=" * 60)
-    else:
-        print("=" * 60)
-        print("STAGE 2: FINE-TUNING")
-        print("=" * 60)
+    print("=" * 60)
+    print("STAGE 2: DIFFUSION TRAINING (Latent Space)")
+    print("=" * 60)
 
     print("\nConfiguration:")
     for key, value in config.items():
@@ -196,8 +209,8 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
             use_wandb = False
         else:
             wandb.init(
-                project=config.get("wandb_project", "text-to-emoji"),
-                name=config.get("wandb_run_name", None),
+                project=config.get("wandb_project", "tiny-stable-diffusion"),
+                name=config.get("wandb_run_name", "diffusion-training"),
                 config=config,
             )
             print("Wandb logging enabled")
@@ -222,6 +235,28 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
         pin_memory=True,
     )
 
+    # Load pre-trained VAE
+    vae_checkpoint = config.get("vae_checkpoint", "checkpoints/vae.pt")
+    if not Path(vae_checkpoint).exists():
+        print(f"Error: VAE checkpoint not found: {vae_checkpoint}")
+        print("Please train VAE first using --train-vae")
+        return
+
+    print(f"Loading VAE from {vae_checkpoint}...")
+    vae = create_vae(
+        image_size=config["image_size"],
+        z_channels=config.get("latent_channels", config.get("in_channels", 16)),
+        ch=config.get("vae_ch", 64),
+        ch_mult=tuple(config.get("vae_ch_mult", [1, 2, 4, 4])),
+    )
+    vae_state = torch.load(vae_checkpoint, map_location=device)
+    vae.load_state_dict(vae_state["model_state_dict"])
+    vae = vae.to(device)
+    vae.eval()
+    for param in vae.parameters():
+        param.requires_grad = False
+    print("VAE loaded and frozen")
+
     # Load CLIP encoder
     print("Loading CLIP text encoder...")
     clip_encoder = CLIPTextEncoder()
@@ -234,11 +269,17 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
         uncond_embed = clip_encoder.encode([""])
     uncond_embed = uncond_embed.to(device)
 
-    # Initialize model
-    print(f"Initializing DiT-{config['model_size']}...")
+    # Initialize DiT model for latent space
+    latent_size = config.get("latent_size", config["image_size"] // 8)
+    in_channels = config.get("in_channels", 16)
+
+    print(f"Initializing DiT-{config['model_size']} for latent space...")
+    print(f"  Latent size: {latent_size}x{latent_size}")
+    print(f"  Latent channels: {in_channels}")
+
     model = DiT(
-        in_channels=3,
-        image_size=config["image_size"],
+        in_channels=in_channels,
+        image_size=latent_size,
         patch_size=config["patch_size"],
         model_size=config["model_size"],
         clip_embed_dim=clip_encoder.embedding_dim,
@@ -248,13 +289,8 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
     )
     model = model.to(device)
 
-    # Load pretrained checkpoint if available
-    pretrain_checkpoint = config.get("pretrain_checkpoint")
-    if pretrain_checkpoint and Path(pretrain_checkpoint).exists():
-        print(f"Loading pretrained checkpoint: {pretrain_checkpoint}")
-        checkpoint = torch.load(pretrain_checkpoint, map_location=device)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        print("Pretrained weights loaded")
+    num_params = sum(p.numel() for p in model.parameters())
+    print(f"DiT parameters: {num_params / 1_000_000:.2f}M")
 
     # Initialize EMA
     ema = None
@@ -296,7 +332,7 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
     # Mixed precision
-    use_amp = config["mixed_precision"] and device.type == "cuda"
+    use_amp = config.get("mixed_precision", False) and device.type == "cuda"
     scaler = torch.cuda.amp.GradScaler() if use_amp else None
     if use_amp:
         print("Mixed precision training enabled")
@@ -310,7 +346,7 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
     print(f"Initial CFG probability: {initial_cfg}")
 
     # Training loop
-    print(f"\nStarting training for {config['epochs']} epochs...")
+    print(f"\nStarting diffusion training for {config['epochs']} epochs...")
     best_loss = float("inf")
     global_step = 0
 
@@ -330,6 +366,7 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
             diffusion=diffusion,
             dataloader=dataloader,
             clip_encoder=clip_encoder,
+            vae_encoder=vae,
             optimizer=optimizer,
             scheduler=scheduler,
             ema=ema,
@@ -369,24 +406,25 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
             )
 
         # Generate validation samples
-        if (epoch + 1) % config["validation_interval"] == 0:
+        if (epoch + 1) % config.get("validation_interval", 10) == 0:
             print("\nGenerating validation samples...")
             samples = generate_samples(
                 model=model,
                 diffusion=diffusion,
                 clip_encoder=clip_encoder,
+                vae_decoder=vae,
                 prompts=config["validation_prompts"],
                 device=device,
                 guidance_scale=config["guidance_scale"],
-                image_size=config["image_size"],
+                latent_size=latent_size,
+                latent_channels=in_channels,
             )
 
-            sample_dir = Path(config["sample_dir"]) / f"epoch_{epoch + 1}"
+            sample_dir = Path(config.get("sample_dir", "samples")) / f"epoch_{epoch + 1}"
             sample_dir.mkdir(parents=True, exist_ok=True)
 
             for i, prompt in enumerate(config["validation_prompts"]):
                 img = samples[i]
-                img = (img + 1) / 2
                 img = img.permute(1, 2, 0).mul(255).clamp(0, 255).to(torch.uint8).cpu().numpy()
                 img = Image.fromarray(img)
                 safe_prompt = prompt.replace(" ", "_")[:20]
@@ -395,7 +433,7 @@ def train(config: dict[str, Any], use_wandb: bool = False) -> None:
             print(f"Saved samples to {sample_dir}")
 
     print("\n" + "=" * 60)
-    print("Training complete!")
+    print("Diffusion Training complete!")
     print(f"Best loss: {best_loss:.4f}")
     print(f"Checkpoint: {config['checkpoint_path']}")
     print("=" * 60)

@@ -1,4 +1,4 @@
-"""Configuration loading utilities."""
+"""Configuration loading utilities for tiny-stable-diffusion."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def load_config(config_path: Path | str | None = None) -> dict[str, Any]:
         config_path: Path to config file. If None, uses default config.yaml in project root.
 
     Returns:
-        Configuration dictionary with training_stage, pretrain, finetune, and common keys.
+        Configuration dictionary with training_stage, vae_train, diffusion_train, and common keys.
     """
     if config_path is None:
         # Find project root by looking for config.yaml
@@ -35,7 +35,7 @@ def get_config(stage: str, config_path: Path | str | None = None) -> dict[str, A
     """Get merged configuration for a specific training stage.
 
     Args:
-        stage: Either "pretrain" or "finetune"
+        stage: One of "vae_train", "diffusion_train"
         config_path: Optional path to config file
 
     Returns:
@@ -44,7 +44,8 @@ def get_config(stage: str, config_path: Path | str | None = None) -> dict[str, A
     config = load_config(config_path)
 
     # Get top-level settings (like model_type, training_stage)
-    top_level = {k: v for k, v in config.items() if k not in ("common", "pretrain", "finetune")}
+    excluded_keys = ("common", "vae_train", "diffusion_train")
+    top_level = {k: v for k, v in config.items() if k not in excluded_keys}
 
     common = config.get("common", {})
     stage_config = config.get(stage, {})
@@ -59,7 +60,7 @@ def get_training_stage(config_path: Path | str | None = None) -> str:
         config_path: Optional path to config file
 
     Returns:
-        Training stage string ("pretrain" or "finetune")
+        Training stage string ("vae_train" or "diffusion_train")
     """
     config = load_config(config_path)
-    return config.get("training_stage", "pretrain")
+    return config.get("training_stage", "vae_train")
