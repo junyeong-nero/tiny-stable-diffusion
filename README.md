@@ -6,9 +6,9 @@
 
 ## Overview
 
-**tiny-stable-diffusion**은 교육 목적으로 Stable Diffusion 3 파이프라인을 처음부터 구현한 프로젝트입니다. 실제 SD3와 동일한 구조를 따르면서 64x64 해상도로 경량화하여 일반 GPU에서도 학습할 수 있습니다.
+**tiny-stable-diffusion** is a project that implements the Stable Diffusion 3 pipeline from scratch for educational purposes. It follows the same architecture as the actual SD3 while being lightweight at 64x64 resolution, making it trainable on consumer GPUs.
 
-### 핵심 파이프라인
+### Core Pipeline
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -27,22 +27,22 @@
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 왜 Latent Space Diffusion인가?
+### Why Latent Space Diffusion?
 
 | Pixel Space | Latent Space |
 |-------------|--------------|
-| 64×64×3 = 12,288 차원 | 8×8×16 = 1,024 차원 |
-| 계산량 많음 | **12배 효율적** |
-| 메모리 사용량 높음 | **메모리 절약** |
-| 고해상도 어려움 | **고해상도 가능** |
+| 64×64×3 = 12,288 dimensions | 8×8×16 = 1,024 dimensions |
+| High computation | **12x more efficient** |
+| High memory usage | **Memory efficient** |
+| High resolution difficult | **High resolution possible** |
 
-VAE로 이미지를 압축한 후 latent space에서 diffusion을 수행하면 훨씬 효율적으로 학습할 수 있습니다.
+By compressing images with VAE and performing diffusion in latent space, training becomes much more efficient.
 
 ---
 
 ## Architecture
 
-### 전체 시스템 구조
+### Overall System Structure
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -90,7 +90,7 @@ VAE로 이미지를 압축한 후 latent space에서 diffusion을 수행하면 �
 │   │ Random  │  ->  │   DiT   │  ->  │  Clean  │  ->  │ Image │ │
 │   │  Noise  │      │ Denoise │      │ Latent  │      │(64×64)│ │
 │   └─────────┘      └─────────┘      └─────────┘      └───────┘ │
-│                    (DDIM 50步)            │                     │
+│                    (DDIM 50 steps)       │                     │
 │                         ^                 v                     │
 │                    ┌─────────┐      ┌─────────┐                │
 │                    │  Text   │      │   VAE   │                │
@@ -101,7 +101,7 @@ VAE로 이미지를 압축한 후 latent space에서 diffusion을 수행하면 �
 
 ### VAE (Variational AutoEncoder)
 
-SD3 스타일의 AutoencoderKL 구현:
+SD3-style AutoencoderKL implementation:
 
 ```
 Encoder:
@@ -119,52 +119,52 @@ Decoder:
                   → Conv3x3(64→3)
 ```
 
-| 설정 | 값 |
-|------|-----|
+| Setting | Value |
+|---------|-------|
 | Input | 64×64×3 RGB |
 | Latent | 8×8×16 |
-| Compression | f8 (8배 압축) |
+| Compression | f8 (8x compression) |
 | Base channels | 64 |
 | Channel multipliers | [1, 2, 4, 4] |
 | Parameters | ~21M |
 
 ### Diffusion Transformer (DiT / MMDiT)
 
-두 가지 아키텍처를 지원합니다:
+Two architectures are supported:
 
-#### DiT (Vanilla) - Cross-Attention 방식
+#### DiT (Vanilla) - Cross-Attention Method
 ```
 Image Tokens → Self-Attention → Cross-Attention(with Text) → MLP → Output
 ```
 
-| Size | Layers | Hidden | Heads | Params | 용도 |
-|------|--------|--------|-------|--------|------|
-| **S** | 12 | 384 | 6 | **39.9M** | 기본값, 빠른 실험 |
-| B | 12 | 768 | 12 | **158.8M** | 중간 규모 |
-| L | 24 | 1024 | 16 | **559.0M** | 고품질 |
-| XL | 28 | 1152 | 16 | **824.2M** | 최고 품질 |
+| Size | Layers | Hidden | Heads | Params | Use Case |
+|------|--------|--------|-------|--------|----------|
+| **S** | 12 | 384 | 6 | **39.9M** | Default, quick experiments |
+| B | 12 | 768 | 12 | **158.8M** | Medium scale |
+| L | 24 | 1024 | 16 | **559.0M** | High quality |
+| XL | 28 | 1152 | 16 | **824.2M** | Best quality |
 
-#### MMDiT (SD3 스타일) - Joint Attention 방식
+#### MMDiT (SD3 Style) - Joint Attention Method
 ```
 [Text Tokens, Image Tokens] → Joint Self-Attention → Separate MLPs → Output
 ```
 
-| Size | Layers | Hidden | Heads | Params | 용도 |
-|------|--------|--------|-------|--------|------|
-| **S** | 12 | 384 | 6 | **87.0M** | 기본값, 권장 |
-| B | 12 | 768 | 12 | **186.9M** | 중간 규모 |
-| L | 24 | 1024 | 16 | **558.9M** | 고품질 |
-| XL | 28 | 1152 | 16 | **780.1M** | 최고 품질 |
+| Size | Layers | Hidden | Heads | Params | Use Case |
+|------|--------|--------|-------|--------|----------|
+| **S** | 12 | 384 | 6 | **87.0M** | Default, recommended |
+| B | 12 | 768 | 12 | **186.9M** | Medium scale |
+| L | 24 | 1024 | 16 | **558.9M** | High quality |
+| XL | 28 | 1152 | 16 | **780.1M** | Best quality |
 
-**DiT vs MMDiT 비교:**
-| 특징 | DiT | MMDiT |
-|------|-----|-------|
-| Text 처리 | Cross-Attention | Joint Attention |
-| 구조 | 분리된 attention | 통합 attention |
-| 학습 안정성 | 좋음 | 더 좋음 (QK-RMSNorm) |
-| 실제 SD3 | ❌ | ✅ |
+**DiT vs MMDiT Comparison:**
+| Feature | DiT | MMDiT |
+|---------|-----|-------|
+| Text Processing | Cross-Attention | Joint Attention |
+| Architecture | Separate attention | Unified attention |
+| Training Stability | Good | Better (QK-RMSNorm) |
+| Actual SD3 | No | Yes |
 
-**DiT Block 구조:**
+**DiT Block Structure:**
 ```
 Input → LayerNorm → Self-Attention → + → LayerNorm → Cross-Attention → + → LayerNorm → MLP → + → Output
          ↑                           |                                  |               |
@@ -172,14 +172,14 @@ Input → LayerNorm → Self-Attention → + → LayerNorm → Cross-Attention �
                                      (text conditioning)
 ```
 
-**MMDiT Block 구조:**
+**MMDiT Block Structure:**
 ```
 [Text, Image] → Joint LayerNorm → Joint Self-Attention → Split → Separate MLPs → Output
                      ↑                                              |
                      └──────── Time Conditioning ───────────────────┘
 ```
 
-### 실제 SD3와의 비교
+### Comparison with Actual SD3
 
 | Component | Stable Diffusion 3 | tiny-stable-diffusion |
 |-----------|-------------------|----------------------|
@@ -189,42 +189,42 @@ Input → LayerNorm → Self-Attention → + → LayerNorm → Cross-Attention �
 | Diffusion Architecture | MMDiT | **DiT / MMDiT** |
 | Text Encoder | T5-XXL + CLIP-G + CLIP-L | **CLIP ViT-B/32** |
 | Total Parameters | 2B+ | **~60M** |
-| Training Time | 수천 GPU-hours | **수 시간** |
+| Training Time | Thousands of GPU-hours | **A few hours** |
 
 ---
 
 ## Quick Start
 
-### 설치
+### Installation
 
 ```bash
-# uv 패키지 매니저 설치 (권장)
+# Install uv package manager (recommended)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 의존성 설치
+# Install dependencies
 uv sync
 
-# 또는 pip 사용
+# Or use pip
 pip install -e .
 ```
 
-### 전체 학습 파이프라인
+### Full Training Pipeline
 
 ```bash
-# Step 1: VAE 학습 (이미지 압축 학습)
+# Step 1: VAE training (learn image compression)
 uv run main.py --train-vae --epochs 100 --batch-size 32
 
-# Step 2: Diffusion 학습 (latent space에서 노이즈 제거 학습)
+# Step 2: Diffusion training (learn noise removal in latent space)
 uv run main.py --train-diffusion --epochs 200 --batch-size 32
 
-# Step 3: 이미지 생성
+# Step 3: Generate images
 uv run main.py --generate --prompt "a cute cat sitting on a couch"
 ```
 
-### 빠른 테스트
+### Quick Test
 
 ```bash
-# 작은 데이터셋으로 빠르게 테스트
+# Quick test with small dataset
 uv run main.py --train-vae --epochs 10 --dataset reach-vb/pokemon-blip-captions
 uv run main.py --train-diffusion --epochs 20 --dataset reach-vb/pokemon-blip-captions
 ```
@@ -235,7 +235,7 @@ uv run main.py --train-diffusion --epochs 20 --dataset reach-vb/pokemon-blip-cap
 
 ### Stage 1: VAE Training
 
-VAE는 이미지를 latent space로 압축하고 다시 복원하는 방법을 학습합니다.
+VAE learns to compress images to latent space and reconstruct them.
 
 ```bash
 uv run main.py --train-vae \
@@ -244,32 +244,32 @@ uv run main.py --train-vae \
     --learning-rate 1e-4
 ```
 
-**주요 설정 (config.yaml):**
+**Key Settings (config.yaml):**
 ```yaml
 vae_train:
-    image_size: 64           # 입력 이미지 크기
-    latent_channels: 16      # latent 채널 수 (SD3 스타일)
-    vae_ch: 64               # VAE 기본 채널
-    vae_ch_mult: [1, 2, 4, 4]  # 채널 증가 비율
-    kl_weight: 1.0e-6        # KL divergence 가중치
+    image_size: 64           # Input image size
+    latent_channels: 16      # Latent channel count (SD3 style)
+    vae_ch: 64               # VAE base channels
+    vae_ch_mult: [1, 2, 4, 4]  # Channel multiplier ratio
+    kl_weight: 1.0e-6        # KL divergence weight
     epochs: 100
     batch_size: 32
     learning_rate: 1.0e-4
     checkpoint_path: checkpoints/vae.pt
 ```
 
-**학습 팁:**
-- `kl_weight`가 너무 크면 reconstruction quality가 떨어집니다
-- `kl_weight`가 너무 작으면 posterior collapse가 발생할 수 있습니다
-- 권장 시작값: `1e-6`
+**Training Tips:**
+- If `kl_weight` is too large, reconstruction quality degrades
+- If `kl_weight` is too small, posterior collapse may occur
+- Recommended starting value: `1e-6`
 
-**출력:**
-- `checkpoints/vae.pt`: 학습된 VAE 체크포인트
-- `samples/vae_epoch_N/`: reconstruction 샘플 이미지
+**Output:**
+- `checkpoints/vae.pt`: Trained VAE checkpoint
+- `samples/vae_epoch_N/`: Reconstruction sample images
 
 ### Stage 2: Diffusion Training
 
-사전 학습된 VAE를 사용하여 latent space에서 diffusion 모델을 학습합니다.
+Train the diffusion model in latent space using the pre-trained VAE.
 
 ```bash
 uv run main.py --train-diffusion \
@@ -278,17 +278,17 @@ uv run main.py --train-diffusion \
     --batch-size 32
 ```
 
-**주요 설정 (config.yaml):**
+**Key Settings (config.yaml):**
 ```yaml
 diffusion_train:
-    image_size: 64           # 원본 이미지 크기
-    latent_size: 8           # latent 공간 크기 (64/8)
-    in_channels: 16          # latent 채널 (VAE와 일치)
+    image_size: 64           # Original image size
+    latent_size: 8           # Latent space size (64/8)
+    in_channels: 16          # Latent channels (match VAE)
 
-    # CFG (Classifier-Free Guidance) 설정
-    initial_cfg_prob: 0.0    # 초기 unconditional dropout 확률
-    final_cfg_prob: 0.1      # 최종 unconditional dropout 확률
-    cfg_warmup_epochs: 10    # CFG warmup 기간
+    # CFG (Classifier-Free Guidance) settings
+    initial_cfg_prob: 0.0    # Initial unconditional dropout probability
+    final_cfg_prob: 0.1      # Final unconditional dropout probability
+    cfg_warmup_epochs: 10    # CFG warmup period
 
     # VAE
     vae_checkpoint: checkpoints/vae.pt
@@ -299,34 +299,34 @@ diffusion_train:
     checkpoint_path: checkpoints/diffusion.pt
 ```
 
-**학습 과정:**
-1. 이미지를 frozen VAE encoder로 latent로 변환
-2. Latent에 노이즈 추가
-3. DiT가 노이즈 예측
-4. MSE loss로 학습
+**Training Process:**
+1. Convert image to latent using frozen VAE encoder
+2. Add noise to latent
+3. DiT predicts the noise
+4. Train with MSE loss
 
-**출력:**
-- `checkpoints/diffusion.pt`: 학습된 diffusion 체크포인트
-- `samples/epoch_N/`: 생성된 샘플 이미지
+**Output:**
+- `checkpoints/diffusion.pt`: Trained diffusion checkpoint
+- `samples/epoch_N/`: Generated sample images
 
 ---
 
 ## Generation
 
-### 기본 생성
+### Basic Generation
 
 ```bash
-# 단일 프롬프트
+# Single prompt
 uv run main.py --generate --prompt "a photo of a cat"
 
-# 여러 프롬프트
+# Multiple prompts
 uv run main.py --generate --prompt "cat,dog,sunset,mountain"
 
-# 프롬프트당 여러 샘플
+# Multiple samples per prompt
 uv run main.py --generate --prompt "a robot" --num-samples 4
 ```
 
-### 고급 옵션
+### Advanced Options
 
 ```bash
 uv run main.py --generate \
@@ -335,7 +335,7 @@ uv run main.py --generate \
     --vae-checkpoint checkpoints/vae.pt \
     --steps 100 \           # diffusion steps (default: 50)
     --guidance 7.5 \        # CFG scale (default: 7.5)
-    --seed 42 \             # 재현성을 위한 시드
+    --seed 42 \             # seed for reproducibility
     --output my_image.png
 ```
 
@@ -345,21 +345,21 @@ uv run main.py --generate \
 uv run main.py --demo
 ```
 
-프롬프트를 입력하면 실시간으로 이미지를 생성합니다.
+Enter prompts to generate images in real-time.
 
 ---
 
 ## Configuration
 
-모든 설정은 `config.yaml`에서 관리됩니다:
+All settings are managed in `config.yaml`:
 
 ```yaml
 # tiny-stable-diffusion Configuration
 
-# 현재 학습 단계: "vae_train" 또는 "diffusion_train"
+# Current training stage: "vae_train" or "diffusion_train"
 training_stage: vae_train
 
-# Diffusion 모델 타입: "dit" 또는 "mmdit"
+# Diffusion model type: "dit" or "mmdit"
 model_type: mmdit
 
 # ═══════════════════════════════════════════════════════════════
@@ -420,20 +420,20 @@ common:
 
 ## Dataset
 
-### 권장 데이터셋
+### Recommended Datasets
 
-| 데이터셋 | 크기 | 특징 | 용도 |
-|---------|------|------|------|
-| **jxie/flickr8k** | 8K images | 이미지당 5개 캡션, 고품질 | 권장 |
-| reach-vb/pokemon-blip-captions | 833 images | 픽셀아트 스타일 | 빠른 테스트 |
+| Dataset | Size | Features | Use Case |
+|---------|------|----------|----------|
+| **jxie/flickr8k** | 8K images | 5 captions per image, high quality | Recommended |
+| reach-vb/pokemon-blip-captions | 833 images | Pixel art style | Quick testing |
 
-### 데이터셋 변경
+### Changing Dataset
 
 ```bash
-# CLI로 변경
+# Change via CLI
 uv run main.py --train-vae --dataset jxie/flickr8k
 
-# 또는 config.yaml 수정
+# Or modify config.yaml
 vae_train:
     dataset_name: jxie/flickr8k
 ```
@@ -444,61 +444,61 @@ vae_train:
 
 ```
 tiny-stable-diffusion/
-├── main.py                         # CLI 진입점
-├── config.yaml                     # 설정 파일
-├── pyproject.toml                  # 프로젝트 메타데이터
-├── README.md                       # 이 문서
+├── main.py                         # CLI entry point
+├── config.yaml                     # Configuration file
+├── pyproject.toml                  # Project metadata
+├── README.md                       # This document
 │
 ├── src/
 │   ├── models/
 │   │   ├── vae.py                  # VAE (AutoencoderKL)
-│   │   │   ├── Encoder             # 이미지 → latent
-│   │   │   ├── Decoder             # latent → 이미지
-│   │   │   └── training_loss()     # VAE 손실 함수
+│   │   │   ├── Encoder             # Image → latent
+│   │   │   ├── Decoder             # Latent → image
+│   │   │   └── training_loss()     # VAE loss function
 │   │   │
-│   │   ├── diffusion.py            # DDPM/DDIM 프로세스
-│   │   │   ├── q_sample()          # forward diffusion
-│   │   │   ├── p_sample()          # reverse (DDPM)
-│   │   │   ├── ddim_sample()       # reverse (DDIM)
-│   │   │   └── sample()            # 전체 생성 루프
+│   │   ├── diffusion.py            # DDPM/DDIM process
+│   │   │   ├── q_sample()          # Forward diffusion
+│   │   │   ├── p_sample()          # Reverse (DDPM)
+│   │   │   ├── ddim_sample()       # Reverse (DDIM)
+│   │   │   └── sample()            # Full generation loop
 │   │   │
-│   │   ├── factory.py              # DiT 모델 팩토리
-│   │   ├── vanilla_dit.py          # 표준 DiT 구현
+│   │   ├── factory.py              # DiT model factory
+│   │   ├── vanilla_dit.py          # Standard DiT implementation
 │   │   ├── mmdit.py                # Multi-Modal DiT (SD3)
-│   │   └── layers.py               # 공통 레이어
+│   │   └── layers.py               # Common layers
 │   │
 │   ├── training/
-│   │   ├── vae_trainer.py          # VAE 학습 루프
-│   │   ├── trainer.py              # Diffusion 학습 루프
+│   │   ├── vae_trainer.py          # VAE training loop
+│   │   ├── trainer.py              # Diffusion training loop
 │   │   ├── ema.py                  # Exponential Moving Average
-│   │   └── checkpoint.py           # 체크포인트 관리
+│   │   └── checkpoint.py           # Checkpoint management
 │   │
 │   ├── inference/
-│   │   └── generator.py            # 이미지 생성
+│   │   └── generator.py            # Image generation
 │   │
 │   ├── text_encoder/
-│   │   └── clip_encoder.py         # CLIP 텍스트 인코더
+│   │   └── clip_encoder.py         # CLIP text encoder
 │   │
 │   ├── data/
-│   │   ├── dataset.py              # 데이터셋 로더
-│   │   └── loader.py               # DataLoader 유틸리티
+│   │   ├── dataset.py              # Dataset loader
+│   │   └── loader.py               # DataLoader utilities
 │   │
 │   ├── config/
-│   │   ├── loader.py               # config.yaml 로더
-│   │   └── dataclasses.py          # 설정 데이터클래스
+│   │   ├── loader.py               # config.yaml loader
+│   │   └── dataclasses.py          # Configuration dataclasses
 │   │
 │   └── utils/
-│       └── common.py               # 공통 유틸리티
+│       └── common.py               # Common utilities
 │
-├── checkpoints/                    # 저장된 모델
-│   ├── vae.pt                      # VAE 체크포인트
-│   └── diffusion.pt                # Diffusion 체크포인트
+├── checkpoints/                    # Saved models
+│   ├── vae.pt                      # VAE checkpoint
+│   └── diffusion.pt                # Diffusion checkpoint
 │
-├── samples/                        # 생성된 샘플
+├── samples/                        # Generated samples
 │   ├── vae_epoch_N/                # VAE reconstruction
-│   └── epoch_N/                    # Diffusion 생성 결과
+│   └── epoch_N/                    # Diffusion generation results
 │
-└── tests/                          # 테스트 코드
+└── tests/                          # Test code
 ```
 
 ---
@@ -512,32 +512,32 @@ usage: main.py [-h] [--train-vae] [--train-diffusion] [--train]
 tiny-stable-diffusion - Stable Diffusion 3 from Scratch
 
 Training:
-  --train-vae           Stage 1: VAE 학습
-  --train-diffusion     Stage 2: Diffusion 학습 (VAE 필요)
-  --train               config.yaml의 training_stage 사용
+  --train-vae           Stage 1: Train VAE
+  --train-diffusion     Stage 2: Train Diffusion (requires VAE)
+  --train               Use training_stage from config.yaml
 
-  --epochs N            에포크 수
-  --batch-size N        배치 크기
-  --learning-rate F     학습률
-  --dataset NAME        데이터셋 이름
-  --vae-checkpoint P    VAE 체크포인트 경로
+  --epochs N            Number of epochs
+  --batch-size N        Batch size
+  --learning-rate F     Learning rate
+  --dataset NAME        Dataset name
+  --vae-checkpoint P    VAE checkpoint path
 
 Generation:
-  --generate            이미지 생성
-  --demo                인터랙티브 데모
+  --generate            Generate images
+  --demo                Interactive demo
 
-  --prompt TEXT         프롬프트 (쉼표로 구분)
-  --num-samples N       프롬프트당 샘플 수
-  --steps N             diffusion 스텝 (default: 50)
-  --guidance F          CFG 스케일 (default: 7.5)
-  --seed N              랜덤 시드
-  --checkpoint P        Diffusion 체크포인트
-  --output PATH         출력 파일 경로
+  --prompt TEXT         Prompt (comma-separated)
+  --num-samples N       Samples per prompt
+  --steps N             Diffusion steps (default: 50)
+  --guidance F          CFG scale (default: 7.5)
+  --seed N              Random seed
+  --checkpoint P        Diffusion checkpoint
+  --output PATH         Output file path
 
 Logging:
-  --wandb               Wandb 로깅 활성화
-  --wandb-project NAME  Wandb 프로젝트 이름
-  --wandb-run-name NAME Wandb 런 이름
+  --wandb               Enable Wandb logging
+  --wandb-project NAME  Wandb project name
+  --wandb-run-name NAME Wandb run name
 ```
 
 ---
@@ -546,7 +546,7 @@ Logging:
 
 ### Diffusion Process
 
-**Forward Process (노이즈 추가):**
+**Forward Process (adding noise):**
 ```
 x_t = √(α̅_t) × x_0 + √(1 - α̅_t) × ε
 ```
@@ -566,11 +566,11 @@ loss = weight × MSE(ε_θ, ε)
 ### Classifier-Free Guidance (CFG)
 
 ```python
-# 학습 시: 10% 확률로 텍스트 조건 드롭
+# During training: drop text condition with 10% probability
 if random() < 0.1:
-    text_embed = uncond_embed  # 빈 문자열 임베딩
+    text_embed = uncond_embed  # Empty string embedding
 
-# 추론 시: conditional과 unconditional 예측 결합
+# During inference: combine conditional and unconditional predictions
 noise_pred = uncond_pred + guidance_scale × (cond_pred - uncond_pred)
 ```
 
@@ -596,4 +596,4 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ## Contributing
 
-이슈와 PR을 환영합니다. 교육 목적의 프로젝트이므로 코드의 명확성과 이해하기 쉬운 구현을 중시합니다.
+Issues and PRs are welcome. As this is an educational project, we prioritize code clarity and easy-to-understand implementations.
