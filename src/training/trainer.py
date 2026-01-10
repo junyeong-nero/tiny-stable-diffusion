@@ -221,11 +221,13 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
 
     # Load dataset
     dataset = get_dataset(config)
-    print(f"Dataset size: {len(dataset)}")
-
-    if len(dataset) == 0:
-        print("Error: Dataset is empty!")
-        return
+    if hasattr(dataset, "__len__"):
+        print(f"Dataset size: {len(dataset)}")
+        if len(dataset) == 0:
+            print("Error: Dataset is empty!")
+            return
+    else:
+        print("Dataset: streaming mode (size unknown)")
 
     dataloader = create_dataloader(
         dataset,

@@ -1,1 +1,1 @@
-uv run main.py --train-vae --epochs
+uv run main.py --train-vae

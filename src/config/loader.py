@@ -15,7 +15,7 @@ def load_config(config_path: Path | str | None = None) -> dict[str, Any]:
         config_path: Path to config file. If None, uses default config.yaml in project root.
 
     Returns:
-        Configuration dictionary with training_stage, vae_train, diffusion_train, and common keys.
+        Configuration dictionary with training_stage, vae_train, and diffusion_train keys.
     """
     if config_path is None:
         # Find project root by looking for config.yaml
@@ -39,18 +39,17 @@ def get_config(stage: str, config_path: Path | str | None = None) -> dict[str, A
         config_path: Optional path to config file
 
     Returns:
-        Merged configuration dictionary with top-level, common + stage-specific settings.
+        Merged configuration dictionary with top-level + stage-specific settings.
     """
     config = load_config(config_path)
 
-    # Get top-level settings (like model_type, training_stage)
-    excluded_keys = ("common", "vae_train", "diffusion_train")
+    # Get top-level settings (like training_stage)
+    excluded_keys = ("vae_train", "diffusion_train")
     top_level = {k: v for k, v in config.items() if k not in excluded_keys}
 
-    common = config.get("common", {})
     stage_config = config.get(stage, {})
 
-    return {**top_level, **common, **stage_config}
+    return {**top_level, **stage_config}
 
 
 def get_training_stage(config_path: Path | str | None = None) -> str:

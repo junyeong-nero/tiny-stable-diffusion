@@ -359,9 +359,6 @@ All settings are managed in `config.yaml`:
 # Current training stage: "vae_train" or "diffusion_train"
 training_stage: vae_train
 
-# Diffusion model type: "dit" or "mmdit"
-model_type: mmdit
-
 # ═══════════════════════════════════════════════════════════════
 # Stage 1: VAE Training
 # ═══════════════════════════════════════════════════════════════
@@ -382,6 +379,7 @@ vae_train:
 # Stage 2: Diffusion Training
 # ═══════════════════════════════════════════════════════════════
 diffusion_train:
+    model_type: mmdit        # "dit" or "mmdit"
     data_source: caption
     dataset_name: jxie/flickr8k
     image_size: 64
@@ -395,11 +393,7 @@ diffusion_train:
     batch_size: 32
     learning_rate: 1.0e-4
     checkpoint_path: checkpoints/diffusion.pt
-
-# ═══════════════════════════════════════════════════════════════
-# Common Settings
-# ═══════════════════════════════════════════════════════════════
-common:
+    # Model settings
     model_size: S           # S, B, L, XL
     patch_size: 2
     num_timesteps: 1000

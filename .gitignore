@@ -1,4 +1,5 @@
 .claude/
+.serena/
 .ruff_cache/
 wandb/
 

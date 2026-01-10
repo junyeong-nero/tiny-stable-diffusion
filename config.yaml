@@ -4,9 +4,6 @@
 # Training stage: "vae_train", "diffusion_train"
 training_stage: vae_train
 
-# Model type for diffusion: "dit" (Diffusion Transformer) or "mmdit" (Multi-Modal DiT from SD3)
-model_type: mmdit
-
 # =============================================================================
 # Stage 1: VAE Training
 # =============================================================================
@@ -45,6 +42,8 @@ vae_train:
 # Stage 2: Diffusion Training (on latent space)
 # =============================================================================
 diffusion_train:
+    # Model type: "dit" (Diffusion Transformer) or "mmdit" (Multi-Modal DiT from SD3)
+    model_type: mmdit
     # Data source: "streaming_caption" for large datasets
     data_source: streaming_caption
     dataset_name: hmu013/LAION-300k
@@ -76,11 +75,8 @@ diffusion_train:
 
     # Checkpoint
     checkpoint_path: checkpoints/diffusion.pt
+    checkpoint_dir: checkpoints
 
-# =============================================================================
-# Common Settings
-# =============================================================================
-common:
     # DiT/MMDiT model configuration
     model_size: S  # Options: S (30M), B (130M), L (300M), XL (675M)
     patch_size: 2
@@ -108,7 +104,6 @@ common:
         - a red sports car
     validation_interval: 10
     sample_dir: samples
-    checkpoint_dir: checkpoints
 
     # MMDiT-specific settings
     qk_rmsnorm: true
