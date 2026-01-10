@@ -108,7 +108,7 @@ class TestProjectConfig:
     def test_default_values(self) -> None:
         """Test default configuration values."""
         config = ProjectConfig()
-        assert config.name == "pixmoji-diffusion"
+        assert config.name == "text-to-emoji-diffusion"
         assert config.seed == 42
 
 

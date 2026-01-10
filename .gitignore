@@ -12,7 +12,6 @@ data/*
 .cache/
 ~/.cache/text-to-emoji/
 ~/.cache/huggingface/
-~/.cache/pixmoji/
 
 # Generated images and samples
 assets/

@@ -39,7 +39,7 @@ class EmojiDataset(Dataset):
         self,
         dataset_name: str = "junyeong-nero/emoji-32",
         split: str = "train",
-        cache_dir: str = "~/.cache/pixmoji",
+        cache_dir: str = "~/.cache/text-to-emoji",
         transform: Callable | None = None,
         streaming: bool = False,
         image_field: str = "image_apple",
