@@ -218,7 +218,12 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
     )
 
     # Learning rate scheduler
-    num_steps_per_epoch = len(dataloader)
+    # For streaming datasets, use config value or estimate
+    if hasattr(dataloader.dataset, "__len__"):
+        num_steps_per_epoch = len(dataloader)
+    else:
+        num_steps_per_epoch = config.get("steps_per_epoch", 1000)
+        print(f"Using configured steps_per_epoch: {num_steps_per_epoch}")
     total_steps = config["epochs"] * num_steps_per_epoch
     warmup_steps = total_steps // 20
 

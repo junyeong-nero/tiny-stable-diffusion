@@ -699,7 +699,17 @@ class StreamingCaptionDataset(IterableDataset):
         else:
             self.transform = transform
 
+        # Load dataset once and cache it
         print(f"StreamingCaptionDataset: {dataset_name} (split={split})")
+        print("Loading dataset (this may take a moment)...")
+        from datasets import load_dataset
+
+        self._dataset = load_dataset(
+            dataset_name,
+            split=split,
+            streaming=True,
+        )
+        print("Dataset loaded successfully.")
 
     def _load_image_from_url(self, url: str) -> Image.Image:
         """Load image from URL with retry logic."""
@@ -807,18 +817,10 @@ class StreamingCaptionDataset(IterableDataset):
             raise e
 
     def __iter__(self):
-        from datasets import load_dataset
-
-        dataset = load_dataset(
-            self.dataset_name,
-            split=self.split,
-            streaming=True,
-        )
-
         # Shuffle buffer for randomization
         buffer = []
 
-        for sample in dataset:
+        for sample in self._dataset:
             processed = self._process_sample(sample)
             if processed is not None:
                 buffer.append(processed)
