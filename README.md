@@ -363,16 +363,18 @@ training_stage: vae_train
 # Stage 1: VAE Training
 # ═══════════════════════════════════════════════════════════════
 vae_train:
-    data_source: caption
-    dataset_name: jxie/flickr8k
+    data_source: streaming_caption
+    dataset_name: hmu013/LAION-300k
+    image_field: png
+    caption_field: json
     image_size: 64
     latent_channels: 16
     vae_ch: 64
     vae_ch_mult: [1, 2, 4, 4]
     kl_weight: 1.0e-6
     epochs: 100
-    batch_size: 32
-    learning_rate: 1.0e-4
+    batch_size: 128
+    learning_rate: 4.0e-4
     checkpoint_path: checkpoints/vae.pt
 
 # ═══════════════════════════════════════════════════════════════
@@ -380,8 +382,10 @@ vae_train:
 # ═══════════════════════════════════════════════════════════════
 diffusion_train:
     model_type: mmdit        # "dit" or "mmdit"
-    data_source: caption
-    dataset_name: jxie/flickr8k
+    data_source: streaming_caption
+    dataset_name: visual-layer/oxford-iiit-pet-vl-enriched
+    image_field: image
+    caption_field: caption_enriched
     image_size: 64
     latent_size: 8
     in_channels: 16
@@ -418,18 +422,22 @@ diffusion_train:
 
 | Dataset | Size | Features | Use Case |
 |---------|------|----------|----------|
-| **jxie/flickr8k** | 8K images | 5 captions per image, high quality | Recommended |
+| **hmu013/LAION-300k** | 300K images | Large-scale, diverse | VAE training |
+| **visual-layer/oxford-iiit-pet-vl-enriched** | 7.4K images | Pet images, enriched captions | Diffusion training |
 | reach-vb/pokemon-blip-captions | 833 images | Pixel art style | Quick testing |
 
 ### Changing Dataset
 
 ```bash
 # Change via CLI
-uv run main.py --train-vae --dataset jxie/flickr8k
+uv run main.py --train-vae --dataset hmu013/LAION-300k
 
 # Or modify config.yaml
 vae_train:
-    dataset_name: jxie/flickr8k
+    data_source: streaming_caption
+    dataset_name: hmu013/LAION-300k
+    image_field: png
+    caption_field: json
 ```
 
 ---

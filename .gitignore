@@ -2,6 +2,8 @@
 .serena/
 .ruff_cache/
 wandb/
+CLAUDE.md
+AGNETS.md
 
 # Model checkpoints
 checkpoints/
