@@ -89,7 +89,7 @@ class DataConfig:
     num_workers: int = 0
     pin_memory: bool = True
     prefetch_factor: int | None = None
-    cache_dir: str = "~/.cache/text-to-emoji"
+    cache_dir: str = "~/.cache/tiny-stable-diffusion"
     streaming: bool = False
     use_coarse_labels: bool = False
     use_augmentation: bool = True
@@ -118,7 +118,7 @@ class InferenceConfig:
 class ProjectConfig:
     """Project-wide configuration."""
 
-    name: str = "text-to-emoji-diffusion"
+    name: str = "tiny-stable-diffusion"
     experiment_name: str = "experiment_1"
     seed: int = 42
     device: str = "auto"

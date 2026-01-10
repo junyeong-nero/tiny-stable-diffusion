@@ -39,7 +39,7 @@ class EmojiDataset(Dataset):
         self,
         dataset_name: str = "junyeong-nero/emoji-32",
         split: str = "train",
-        cache_dir: str = "~/.cache/text-to-emoji",
+        cache_dir: str = "~/.cache/tiny-stable-diffusion",
         transform: Callable | None = None,
         streaming: bool = False,
         image_field: str = "image_apple",
@@ -411,7 +411,7 @@ class CaptionDataset(Dataset):
         self,
         dataset_name: str,
         split: str = "train",
-        cache_dir: str = "~/.cache/text-to-emoji",
+        cache_dir: str = "~/.cache/tiny-stable-diffusion",
         transform: Callable | None = None,
         image_field: str = "image",
         caption_field: str = "caption",
@@ -459,7 +459,10 @@ class CaptionDataset(Dataset):
         if transform is None:
             self.transform = transforms.Compose(
                 [
-                    transforms.Resize((target_size, target_size), interpolation=transforms.InterpolationMode.BICUBIC),
+                    transforms.Resize(
+                        (target_size, target_size),
+                        interpolation=transforms.InterpolationMode.BICUBIC,
+                    ),
                     transforms.ToTensor(),
                     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
                 ]

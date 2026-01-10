@@ -10,7 +10,7 @@ data/*
 
 # HuggingFace cache directories
 .cache/
-~/.cache/text-to-emoji/
+~/.cache/tiny-stable-diffusion/
 ~/.cache/huggingface/
 
 # Generated images and samples
