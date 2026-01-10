@@ -819,16 +819,26 @@ class StreamingCaptionDataset(IterableDataset):
     def __iter__(self):
         # Shuffle buffer for randomization
         buffer = []
+        # Start yielding when buffer reaches min_buffer_size for faster startup
+        min_buffer_size = min(10, self.buffer_size)
+        buffer_filled = False
 
         for sample in self._dataset:
             processed = self._process_sample(sample)
             if processed is not None:
                 buffer.append(processed)
 
-                if len(buffer) >= self.buffer_size:
-                    # Yield a random sample from buffer
-                    idx = random.randint(0, len(buffer) - 1)
-                    yield buffer.pop(idx)
+                # Start yielding early once we have minimum samples
+                if len(buffer) >= min_buffer_size:
+                    if not buffer_filled and len(buffer) < self.buffer_size:
+                        # Yield but keep growing the buffer
+                        idx = random.randint(0, len(buffer) - 1)
+                        yield buffer.pop(idx)
+                    elif len(buffer) >= self.buffer_size:
+                        buffer_filled = True
+                        # Yield a random sample from buffer
+                        idx = random.randint(0, len(buffer) - 1)
+                        yield buffer.pop(idx)
 
         # Yield remaining samples in buffer
         random.shuffle(buffer)
