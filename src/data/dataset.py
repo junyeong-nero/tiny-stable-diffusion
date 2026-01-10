@@ -11,6 +11,7 @@ Images are automatically resized to 32x32 for consistency.
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 from typing import Callable
 
@@ -499,19 +500,29 @@ class CaptionDataset(Dataset):
         elif image.mode != "RGB":
             image = image.convert("RGB")
 
-        # Get caption (try multiple field names)
+        # Get caption (try multiple field names and formats)
         caption = None
-        for field in [self.caption_field, "text", "caption", "captions"]:
-            caption = sample.get(field)
-            if caption is not None:
-                break
+
+        # Check for multi-column captions (e.g., caption_0, caption_1, ...)
+        # This format is used by datasets like jxie/flickr8k
+        caption_columns = [key for key in sample.keys() if key.startswith("caption_")]
+        if caption_columns:
+            # Randomly select one caption for data augmentation
+            selected_col = random.choice(caption_columns)
+            caption = sample.get(selected_col)
+        else:
+            # Try single caption field
+            for field in [self.caption_field, "text", "caption", "captions"]:
+                caption = sample.get(field)
+                if caption is not None:
+                    break
 
         if caption is None:
             caption = f"image_{idx}"
 
-        # Handle multiple captions (e.g., Flickr8k has 5 captions per image)
+        # Handle multiple captions if it's a list
         if isinstance(caption, list):
-            caption = caption[0]  # Use first caption
+            caption = random.choice(caption)  # Randomly select for augmentation
 
         if self.transform:
             image = self.transform(image)

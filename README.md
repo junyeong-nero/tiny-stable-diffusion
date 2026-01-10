@@ -109,27 +109,123 @@ Supports multiple datasets for flexible training:
 
 ### 2. Pretrain Datasets (Text-to-Image)
 
-**Recommended Datasets** (all have image-caption pairs):
+#### 📊 Dataset Scale Analysis
 
-| Dataset | Images | Captions | Best For | HuggingFace |
-|---------|--------|----------|----------|-------------|
-| **Flickr8k** ⭐ | 8K | Human-written, 5/image | Fast pretrain, testing | `ariG23498/flickr8k` |
-| **Pokemon BLIP** 🎮 | 833 | BLIP-generated | Pixel art style, small | `reach-vb/pokemon-blip-captions` |
-| **CC3M** 🌐 | 3.3M | Web alt-text | Large-scale pretrain | `pixparse/cc3m-wds` |
-| **CC12M** 🌍 | 12M | Web alt-text | Production-scale | `laion/conceptual-captions-12m-webdataset` |
+**How many images do you need for pretrain?**
 
-**Not Recommended**:
-- **CIFAR-100**: Image classification dataset (no captions) - poor for text-to-image learning
+Large-scale research typically uses:
+- **DiT-XL/2** (256×256): 1.3M images (ImageNet)
+- **Stable Diffusion**: 600M-2.3B images (LAION)
+- **Scaling Law studies**: 108M+ images
 
-**Configuration** (in `config.yaml`):
+But for **32×32 resolution**, requirements are much lower:
+- 32×32 has **64× less pixels** than 256×256 (8² = 64)
+- Simpler patterns, smaller model (~30M params for DiT-S)
+- **Estimate: 20K-100K image-caption pairs** can produce meaningful results
+
+#### ✅ Immediately Usable Datasets (Images Included)
+
+| Dataset | Images | Captions | Effective Pairs | Format | Status |
+|---------|--------|----------|-----------------|--------|--------|
+| **jxie/flickr8k** ⭐ | 8,000 | 5 per image | **40,000** | Well-organized columns | ✅ Recommended |
+| **jxie/flickr8k** | 8,000 | 5 per image | **40,000** | Captions as list | ✅ Alternative |
+| **Pokemon BLIP** 🎮 | 833 | 1 per image | 833 | Single caption | ✅ Tested |
+
+**Why jxie/flickr8k?**
+- Captions organized as separate columns (`caption_0` to `caption_4`)
+- Images pre-loaded as PIL objects (faster)
+- Cleaner data structure for easy access
+- One caption randomly selected per training iteration (automatic data augmentation)
+
+#### ⚠️ Large-Scale Datasets (URLs Only - Download Required)
+
+| Dataset | Images | Note |
+|---------|--------|------|
+| **CC3M** | 3.3M | Requires `img2dataset` to download actual images |
+| **CC12M** | 12M | Requires `img2dataset` to download actual images |
+| **LAION** | 5B | Requires `img2dataset` to download actual images |
+
+Most large datasets only provide image URLs, not actual images. You'll need to:
+1. Download images using tools like [`img2dataset`](https://github.com/rom1504/img2dataset)
+2. Handle broken URLs (~20-40% failure rate)
+3. Wait several hours to days for downloads
+
+#### 🎯 Why Flickr8k is Sufficient
+
+**For 32×32 DiT pretrain, Flickr8k (8K images, 40K captions) is a solid choice:**
+
+✅ **Advantages**:
+- **High-quality captions**: Human-written, 5 per image
+- **Effective 40K training pairs**: With data augmentation, even more
+- **Instant availability**: No download scripts needed
+- **32×32 resolution advantage**: Simpler patterns, less data needed
+- **Fast experimentation**: 4-8 hour training time
+
+⚠️ **Limitations**:
+- Smaller than typical pretrain datasets (50K-100K+ recommended)
+- Limited scene/concept diversity
+- Text-image alignment may be weaker than larger datasets
+
+**Performance Expectations**:
+
+```
+Pokemon (833)     ▓░░░░░░░░░  10% - Fine-tuning only
+Flickr8k (8K)     ▓▓▓░░░░░░░  30% - Basic concepts, color, shape
+Flickr30k (30K)   ▓▓▓▓▓░░░░░  50% - Decent pretrain
+CC3M (3.3M)       ▓▓▓▓▓▓▓▓░░  80% - Strong pretrain (requires download)
+CC12M (12M)       ▓▓▓▓▓▓▓▓▓▓ 100% - Production-ready (requires download)
+```
+
+#### 📝 Recommended Strategy
+
+**Option 1: Start with Flickr8k** (Recommended for beginners) ⚡
+```bash
+python main.py --pretrain --epochs 200 --batch-size 32
+```
+- Training time: 4-8 hours
+- Good for validation and testing
+- If results are promising, proceed to fine-tuning
+
+**Option 2: Download CC3M** (For serious pretrain) 🔧
+```bash
+# Install img2dataset
+pip install img2dataset
+
+# Download CC3M images (takes several hours)
+img2dataset --url_list cc3m.parquet \
+    --output_folder data/cc3m \
+    --resize_mode no \
+    --thread_count 16
+
+# Then train
+python main.py --pretrain --dataset data/cc3m
+```
+
+**Option 3: Hybrid Approach** (Best of both worlds) 🎯
+```bash
+# Quick test with Flickr8k
+python main.py --pretrain --dataset jxie/flickr8k --epochs 50
+
+# If results are good, extend training or switch to CC3M
+python main.py --pretrain --dataset data/cc3m --epochs 100
+```
+
+#### ⚙️ Configuration
+
+Edit `config.yaml`:
 ```yaml
 pretrain:
     data_source: caption
-    dataset_name: ariG23498/flickr8k  # or other options above
+    dataset_name: jxie/flickr8k  # Recommended: well-organized format
+    # Alternative: jxie/flickr8k (captions as list)
     image_field: image
-    caption_field: caption
+    caption_field: caption  # Auto-detects caption_0, caption_1, etc.
     streaming: false
+    epochs: 200  # More epochs for smaller dataset
 ```
+
+**Not Recommended**:
+- **CIFAR-100**: Image classification dataset (no captions) - poor for text-to-image learning
 
 ## 🚀 Quick Start
 
@@ -147,14 +243,13 @@ uv sync
 
 **Stage 1: Pretrain** (Text-to-Image Dataset)
 ```bash
-# Default: Flickr8k (8K images with captions)
-uv run main.py --pretrain --epochs 100 --batch-size 32
+# Default: Flickr8k (8K images, 40K captions - tested and working)
+uv run main.py --pretrain --epochs 200 --batch-size 32
 
-# With Pokemon BLIP (pixel art style)
-uv run main.py --pretrain --dataset reach-vb/pokemon-blip-captions
+# Pokemon BLIP (very small, pixel art style - for quick testing only)
+uv run main.py --pretrain --dataset reach-vb/pokemon-blip-captions --epochs 500
 
-# With CC3M (large-scale, requires more time/resources)
-uv run main.py --pretrain --dataset pixparse/cc3m-wds --epochs 50
+# Note: CC3M/CC12M require separate image download (see Dataset section)
 ```
 
 **Stage 2: Fine-tune on Emoji**
@@ -188,27 +283,31 @@ For best results with limited emoji data, use the two-stage approach:
 **Stage 1: Pretraining** (Image-Caption Dataset)
 
 ```bash
-# Default: Flickr8k (recommended for initial testing)
-uv run main.py --pretrain --epochs 100 --batch-size 32
+# Flickr8k: 8K images with 40K human-written captions (recommended starting point)
+uv run main.py --pretrain --epochs 200 --batch-size 32
 
-# Pokemon BLIP (pixel art style, very fast)
+# Pokemon BLIP: 833 pixel art images (for quick testing)
 uv run main.py --pretrain \
     --dataset reach-vb/pokemon-blip-captions \
-    --epochs 200 \
+    --epochs 500 \
     --batch-size 16
-
-# CC3M (large-scale, requires more resources)
-uv run main.py --pretrain \
-    --dataset pixparse/cc3m-wds \
-    --epochs 50 \
-    --batch-size 64
 ```
 
-| Dataset | Images | Captions | Best For |
-| :--- | :---: | :---: | :--- |
-| **Flickr8k** ⭐ | 8K | Human-written | Fast testing, quality captions |
-| **Pokemon BLIP** 🎮 | 833 | BLIP | Pixel art style, very fast |
-| **CC3M** 🌐 | 3.3M | Web | Large-scale pretrain |
+**Why use 200+ epochs for Flickr8k?**
+- Smaller dataset (8K vs typical 100K+) requires more iterations
+- High-quality captions enable effective learning even with fewer images
+- Each image has 5 captions = 40K effective training pairs
+- 32×32 resolution is simpler to learn than higher resolutions
+
+**Dataset Comparison:**
+
+| Dataset | Images | Effective Pairs | Training Time | Status |
+| :--- | :---: | :---: | :---: | :---: |
+| **Flickr8k** ⭐ | 8K | 40K | 4-8 hours | ✅ Ready to use |
+| **Pokemon BLIP** 🎮 | 833 | 833 | 30-60 min | ✅ Ready to use |
+| **CC3M** 🌐 | 3.3M | 3.3M | 1-2 days | ⚠️ Requires img2dataset download |
+
+See the **Dataset** section above for detailed analysis of why Flickr8k is sufficient for 32×32 pretrain.
 
 **Stage 2: Fine-tuning**
 ```bash

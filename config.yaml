@@ -15,18 +15,32 @@ pretrain:
     data_source: caption
 
     # Caption dataset settings (used when data_source="caption")
-    # Recommended options:
-    # - "ariG23498/flickr8k": 8K images, high-quality captions (FAST, recommended for testing)
-    # - "reach-vb/pokemon-blip-captions": 833 Pokemon images, pixel-art style
-    # - "pixparse/cc3m-wds": 3.3M images (large, for serious pretraining)
-    # - "google-research-datasets/conceptual_captions": CC3M alternative
-    dataset_name: ariG23498/flickr8k
+    #
+    # ⚠️ NOTE: Most large-scale datasets (CC3M, CC12M, LAION) only provide image URLs,
+    # not actual images. They require separate download scripts (img2dataset).
+    #
+    # TESTED & WORKING datasets with actual images:
+    # - "jxie/flickr8k": 8K images, 5 captions per image (caption_0 to caption_4) ⭐ RECOMMENDED
+    #   Well-organized, human-written captions, images as PIL objects
+    # - "ariG23498/flickr8k": Alternative Flickr8k (captions as list)
+    # - "reach-vb/pokemon-blip-captions": 833 Pokemon, pixel-art style (very small)
+    #
+    # For larger datasets, you'll need to:
+    # 1. Download images separately using img2dataset or similar tools
+    # 2. Use local dataset loading
+    #
+    # Given 32x32 resolution, Flickr8k (8K) is sufficient for pretrain.
+    # Each image has 5 high-quality captions = effectively 40K training pairs.
+    # During training, one caption is randomly selected per epoch for data augmentation.
+    dataset_name: jxie/flickr8k  # Best organized Flickr8k dataset
     image_field: image
     caption_field: caption
     streaming: false
     split: train
 
     # Training hyperparameters
+    # Note: Flickr8k (8K images) needs more epochs than larger datasets
+    # With 40K captions (5 per image), 200 epochs = sufficient coverage
     epochs: 200
     batch_size: 32
     learning_rate: 1.0e-4
