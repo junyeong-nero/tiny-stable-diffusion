@@ -35,7 +35,7 @@ vae_train:
 
     # Training hyperparameters
     epochs: 100
-    batch_size: 128
+    batch_size: 256
     learning_rate: 4.0e-4
     kl_weight: 1.0e-6 # Beta-VAE weight
 
@@ -67,7 +67,7 @@ diffusion_train:
 
     # Training hyperparameters
     epochs: 200
-    batch_size: 128
+    batch_size: 256
     learning_rate: 1.0e-4
     initial_cfg_prob: 0.0
     final_cfg_prob: 0.1
