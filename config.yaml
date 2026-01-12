@@ -21,6 +21,10 @@ vae_train:
     url_timeout: 10 # Timeout for URL requests (seconds)
     max_retries: 3 # Max retries for failed requests
 
+    # DataLoader settings
+    num_workers: 8 # Number of worker processes for data loading (0 = main process only)
+    prefetch_factor: 2 # Number of batches to prefetch per worker
+
     # Image settings
     image_size: 64 # Input image size
 
@@ -31,8 +35,8 @@ vae_train:
 
     # Training hyperparameters
     epochs: 100
-    batch_size: 128
-    learning_rate: 4.0e-4
+    batch_size: 1024
+    learning_rate: 2.0e-3
     kl_weight: 1.0e-6 # Beta-VAE weight
 
     # Training settings
@@ -49,18 +53,12 @@ vae_train:
 diffusion_train:
     # Model type: "dit" (Diffusion Transformer) or "mmdit" (Multi-Modal DiT from SD3)
     model_type: mmdit
-    # Data source: "streaming_caption" for large datasets
-    data_source: streaming_caption
+    # Data source: "huggingface" for local datasets, "streaming_caption" for large URL-based datasets
+    data_source: huggingface
     dataset_name: visual-layer/oxford-iiit-pet-vl-enriched
     image_field: image
     caption_field: caption_enriched
     split: train
-
-    # Streaming settings for large datasets
-    buffer_size: 1000 # Shuffle buffer size
-    skip_failures: true # Skip failed samples
-    url_timeout: 10 # Timeout for URL requests (seconds)
-    max_retries: 3 # Max retries for failed requests
 
     # Image and latent settings
     image_size: 64 # Original image size
@@ -69,8 +67,8 @@ diffusion_train:
 
     # Training hyperparameters
     epochs: 200
-    batch_size: 32
-    learning_rate: 1.0e-4
+    batch_size: 1024
+    learning_rate: 1.0e-3
     initial_cfg_prob: 0.0
     final_cfg_prob: 0.1
     cfg_warmup_epochs: 10
@@ -99,6 +97,10 @@ diffusion_train:
     mixed_precision: false
     device: auto
     seed: 42
+
+    # DataLoader settings
+    num_workers: 4 # Number of worker processes for data loading (0 = main process only)
+    prefetch_factor: 2 # Number of batches to prefetch per worker
 
     # Validation
     validation_prompts:
