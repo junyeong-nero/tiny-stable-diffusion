@@ -37,6 +37,7 @@ def main() -> None:
     parser.add_argument("--demo", action="store_true", help="Run interactive demo")
 
     # Training arguments
+    parser.add_argument("--resume", action="store_true", help="Resume training from checkpoint")
     parser.add_argument("--dataset", type=str, default=None, help="Dataset path or name")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint")
     parser.add_argument("--vae-checkpoint", type=str, default=None, help="Path to VAE checkpoint")
@@ -148,6 +149,9 @@ def _run_vae_training(args: argparse.Namespace) -> None:
     config["wandb_project"] = args.wandb_project
     config["wandb_run_name"] = args.wandb_run_name or "vae-training"
 
+    if args.resume:
+        config["resume"] = True
+
     train_vae(config, use_wandb=args.wandb)
 
     # Push to HuggingFace Hub if requested
@@ -188,6 +192,9 @@ def _run_diffusion_training(args: argparse.Namespace) -> None:
 
     config["wandb_project"] = args.wandb_project
     config["wandb_run_name"] = args.wandb_run_name or "diffusion-training"
+
+    if args.resume:
+        config["resume"] = True
 
     train_diffusion(config, use_wandb=args.wandb)
 

@@ -46,6 +46,7 @@ vae_train:
 
     # Checkpoint
     checkpoint_path: checkpoints/vae.pt
+    resume: false  # Set to true to resume training from checkpoint
 
 # =============================================================================
 # Stage 2: Diffusion Training (on latent space)
@@ -79,6 +80,7 @@ diffusion_train:
     # Checkpoint
     checkpoint_path: checkpoints/diffusion.pt
     checkpoint_dir: checkpoints
+    resume: false  # Set to true to resume training from checkpoint
 
     # DiT/MMDiT model configuration
     model_size: S # Options: S (30M), B (130M), L (300M), XL (675M)

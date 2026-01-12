@@ -20,6 +20,7 @@ def save_checkpoint(
     path: str | Path,
     config: dict[str, Any],
     ema: EMA | None = None,
+    global_step: int = 0,
 ) -> None:
     """Save training checkpoint.
 
@@ -39,6 +40,7 @@ def save_checkpoint(
     checkpoint = {
         "epoch": epoch,
         "loss": loss,
+        "global_step": global_step,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
@@ -100,6 +102,7 @@ def load_checkpoint(
     return {
         "epoch": checkpoint.get("epoch", 0),
         "loss": checkpoint.get("loss", float("inf")),
+        "global_step": checkpoint.get("global_step", 0),
         "model_config": checkpoint.get("model_config", {}),
     }
 

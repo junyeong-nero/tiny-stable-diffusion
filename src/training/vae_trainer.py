@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.models.vae import AutoencoderKL, create_vae
-from src.training.checkpoint import save_checkpoint
+from src.training.checkpoint import load_checkpoint, save_checkpoint
 
 try:
     import wandb
@@ -237,6 +237,29 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
+    # Resume from checkpoint if enabled
+    start_epoch = 0
+    global_step = 0
+    best_loss = float("inf")
+    resume = config.get("resume", False)
+    checkpoint_path = Path(config["checkpoint_path"])
+
+    if resume and checkpoint_path.exists():
+        print(f"\nResuming training from checkpoint: {checkpoint_path}")
+        checkpoint_info = load_checkpoint(
+            path=checkpoint_path,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            device=device,
+        )
+        start_epoch = checkpoint_info["epoch"] + 1
+        global_step = checkpoint_info.get("global_step", 0)
+        best_loss = checkpoint_info["loss"]
+        print(f"Resumed from epoch {checkpoint_info['epoch']}, global_step {global_step}, loss {best_loss:.4f}")
+    elif resume:
+        print(f"\nResume enabled but no checkpoint found at {checkpoint_path}. Starting from scratch.")
+
     # Mixed precision
     use_amp = config.get("mixed_precision", False) and device.type == "cuda"
     scaler = torch.cuda.amp.GradScaler() if use_amp else None
@@ -244,12 +267,13 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
         print("Mixed precision training enabled")
 
     # Training loop
-    print(f"\nStarting VAE training for {config['epochs']} epochs...")
-    best_loss = float("inf")
-    global_step = 0
     kl_weight = config.get("kl_weight", 1e-6)
+    if start_epoch > 0:
+        print(f"\nResuming VAE training from epoch {start_epoch + 1}/{config['epochs']}...")
+    else:
+        print(f"\nStarting VAE training for {config['epochs']} epochs...")
 
-    for epoch in range(config["epochs"]):
+    for epoch in range(start_epoch, config["epochs"]):
         avg_loss, global_step = train_vae_one_epoch(
             model=model,
             dataloader=dataloader,
@@ -275,19 +299,19 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
                 step=global_step,
             )
 
-        # Save checkpoint
-        checkpoint_path = config["checkpoint_path"]
+        # Save checkpoint (always save for resume support)
+        save_checkpoint(
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            epoch=epoch,
+            loss=avg_loss,
+            path=checkpoint_path,
+            config=config,
+            global_step=global_step,
+        )
         if avg_loss < best_loss:
             best_loss = avg_loss
-            save_checkpoint(
-                model=model,
-                optimizer=optimizer,
-                scheduler=scheduler,
-                epoch=epoch,
-                loss=avg_loss,
-                path=checkpoint_path,
-                config=config,
-            )
 
         # Generate validation samples
         if (epoch + 1) % config.get("validation_interval", 10) == 0:
