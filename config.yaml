@@ -16,7 +16,7 @@ vae_train:
     split: train
 
     # Streaming settings for large datasets
-    buffer_size: 1000 # Shuffle buffer size
+    buffer_size: 5000 # Shuffle buffer size
     skip_failures: true # Skip failed URL downloads
     url_timeout: 10 # Timeout for URL requests (seconds)
     max_retries: 3 # Max retries for failed requests
