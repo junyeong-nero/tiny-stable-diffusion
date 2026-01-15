@@ -22,13 +22,68 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 
+def get_kl_weight(
+    step: int,
+    total_steps: int,
+    max_weight: float,
+    annealing: str = "cyclical",
+    n_cycles: int = 4,
+    cycle_ratio: float = 0.5,
+) -> float:
+    """Get KL weight based on annealing schedule.
+
+    Args:
+        step: Current training step (global)
+        total_steps: Total training steps
+        max_weight: Maximum/target KL weight
+        annealing: Annealing type ("none", "linear", "cyclical")
+        n_cycles: Number of cycles for cyclical annealing
+        cycle_ratio: Proportion of cycle spent increasing (0-1)
+
+    Returns:
+        Current KL weight value
+    """
+    if annealing == "none":
+        return max_weight
+
+    elif annealing == "linear":
+        # Linear warmup from 0 to max_weight over all steps
+        return max_weight * min(1.0, step / max(1, total_steps))
+
+    elif annealing == "cyclical":
+        # Cyclical annealing: repeat warmup cycles
+        # Reference: "Cyclical Annealing Schedule: A Simple Approach to Mitigating KL Vanishing"
+        cycle_length = total_steps // n_cycles
+        if cycle_length == 0:
+            return max_weight
+
+        current_cycle_step = step % cycle_length
+        warmup_steps = int(cycle_length * cycle_ratio)
+
+        if warmup_steps == 0:
+            return max_weight
+        elif current_cycle_step < warmup_steps:
+            # Linear increase from 0 to max_weight
+            return max_weight * (current_cycle_step / warmup_steps)
+        else:
+            # At max_weight for rest of cycle
+            return max_weight
+
+    else:
+        raise ValueError(f"Unknown annealing type: {annealing}")
+
+
 def train_vae_one_epoch(
     model: AutoencoderKL,
     dataloader: DataLoader,
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
     device: torch.device,
-    kl_weight: float = 1e-6,
+    kl_max_weight: float = 1e-3,
+    kl_annealing: str = "cyclical",
+    kl_n_cycles: int = 4,
+    kl_cycle_ratio: float = 0.5,
+    total_steps: int = 0,
     use_amp: bool = False,
     scaler: torch.cuda.amp.GradScaler | None = None,
     use_wandb: bool = False,
@@ -42,7 +97,11 @@ def train_vae_one_epoch(
         optimizer: Optimizer
         scheduler: Learning rate scheduler
         device: Device to train on
-        kl_weight: Weight for KL divergence loss
+        kl_max_weight: Maximum KL weight (target value)
+        kl_annealing: Annealing type ("none", "linear", "cyclical")
+        kl_n_cycles: Number of cycles for cyclical annealing
+        kl_cycle_ratio: Proportion of cycle spent increasing
+        total_steps: Total training steps (for annealing schedule)
         use_amp: Use automatic mixed precision
         scaler: Gradient scaler for AMP
         use_wandb: Log to wandb
@@ -64,6 +123,16 @@ def train_vae_one_epoch(
     for batch in progress_bar:
         num_batches += 1
         images = batch["image"].to(device)
+
+        # Compute current KL weight based on annealing schedule
+        kl_weight = get_kl_weight(
+            step=global_step,
+            total_steps=total_steps,
+            max_weight=kl_max_weight,
+            annealing=kl_annealing,
+            n_cycles=kl_n_cycles,
+            cycle_ratio=kl_cycle_ratio,
+        )
 
         optimizer.zero_grad()
 
@@ -95,6 +164,7 @@ def train_vae_one_epoch(
                 "loss": f"{loss_dict['total_loss']:.4f}",
                 "recon": f"{loss_dict['recon_loss']:.4f}",
                 "kl": f"{loss_dict['kl_loss']:.2f}",
+                "β": f"{kl_weight:.1e}",
                 "μ": f"{loss_dict['latent_mean']:.2f}",
                 "σ": f"{loss_dict['latent_std']:.3f}",
             }
@@ -106,6 +176,7 @@ def train_vae_one_epoch(
                     "vae/total_loss": loss_dict["total_loss"],
                     "vae/recon_loss": loss_dict["recon_loss"],
                     "vae/kl_loss": loss_dict["kl_loss"],
+                    "vae/kl_weight": kl_weight,
                     "vae/learning_rate": scheduler.get_last_lr()[0],
                     "vae/global_step": global_step,
                     # Latent space statistics
@@ -278,8 +349,18 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
     if use_amp:
         print("Mixed precision training enabled")
 
+    # KL Annealing settings
+    kl_max_weight = config.get("kl_weight", 1e-3)
+    kl_annealing = config.get("kl_annealing", "cyclical")
+    kl_n_cycles = config.get("kl_n_cycles", 4)
+    kl_cycle_ratio = config.get("kl_cycle_ratio", 0.5)
+
+    print(f"\nKL Annealing: {kl_annealing}")
+    print(f"  Max KL weight (β): {kl_max_weight:.1e}")
+    if kl_annealing == "cyclical":
+        print(f"  Cycles: {kl_n_cycles}, Ratio: {kl_cycle_ratio}")
+
     # Training loop
-    kl_weight = config.get("kl_weight", 1e-6)
     if start_epoch > 0:
         print(f"\nResuming VAE training from epoch {start_epoch + 1}/{config['epochs']}...")
     else:
@@ -292,7 +373,11 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
             optimizer=optimizer,
             scheduler=scheduler,
             device=device,
-            kl_weight=kl_weight,
+            kl_max_weight=kl_max_weight,
+            kl_annealing=kl_annealing,
+            kl_n_cycles=kl_n_cycles,
+            kl_cycle_ratio=kl_cycle_ratio,
+            total_steps=total_steps,
             use_amp=use_amp,
             scaler=scaler,
             use_wandb=use_wandb,
@@ -311,9 +396,25 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
             latent_mean_std = mean.std().item()
             latent_std = std.mean().item()
 
+        # Get current KL weight and cycle info
+        current_kl_weight = get_kl_weight(
+            step=global_step,
+            total_steps=total_steps,
+            max_weight=kl_max_weight,
+            annealing=kl_annealing,
+            n_cycles=kl_n_cycles,
+            cycle_ratio=kl_cycle_ratio,
+        )
+        if kl_annealing == "cyclical" and total_steps > 0:
+            cycle_length = total_steps // kl_n_cycles
+            current_cycle = (global_step // cycle_length) + 1 if cycle_length > 0 else 1
+            cycle_info = f" | Cycle {current_cycle}/{kl_n_cycles}"
+        else:
+            cycle_info = ""
+
         print(f"Epoch {epoch + 1}/{config['epochs']}: Loss={avg_loss:.4f} | "
-              f"Latent μ={latent_mean:.3f} (std={latent_mean_std:.3f}), σ={latent_std:.3f} "
-              f"[target: μ≈0, σ≈1]")
+              f"β={current_kl_weight:.1e}{cycle_info} | "
+              f"Latent μ={latent_mean:.3f}, σ={latent_std:.3f} [target: μ≈0, σ≈1]")
 
         # Log epoch metrics to wandb
         if use_wandb and WANDB_AVAILABLE:
@@ -321,6 +422,7 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
                 {
                     "epoch/vae_loss": avg_loss,
                     "epoch/epoch": epoch + 1,
+                    "epoch/kl_weight": current_kl_weight,
                     "epoch/latent_mean": latent_mean,
                     "epoch/latent_mean_std": latent_mean_std,
                     "epoch/latent_std": latent_std,
