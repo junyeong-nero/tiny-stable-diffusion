@@ -34,6 +34,7 @@ def main() -> None:
     parser.add_argument("--train-diffusion", action="store_true", help="Stage 2: Train Diffusion on latent space")
     parser.add_argument("--train", action="store_true", help="Train using config.yaml settings")
     parser.add_argument("--generate", action="store_true", help="Generate images from prompts")
+    parser.add_argument("--reconstruct-vae", action="store_true", help="Reconstruct image through VAE")
     parser.add_argument("--demo", action="store_true", help="Run interactive demo")
 
     # Training arguments
@@ -47,6 +48,7 @@ def main() -> None:
 
     # Generation arguments
     parser.add_argument("--prompt", type=str, default=None, help="Prompt for generation")
+    parser.add_argument("--input", type=str, default=None, help="Input image path (for --reconstruct-vae)")
     parser.add_argument("--num-samples", type=int, default=1, help="Number of samples to generate")
     parser.add_argument("--steps", type=int, default=50, help="Number of diffusion steps")
     parser.add_argument("--guidance", type=float, default=7.5, help="Guidance scale")
@@ -80,6 +82,9 @@ def main() -> None:
 
     elif args.generate:
         _run_generation(args)
+
+    elif args.reconstruct_vae:
+        _run_vae_reconstruction(args)
 
     elif args.demo:
         _run_demo(args)
@@ -236,6 +241,21 @@ def _run_generation(args: argparse.Namespace) -> None:
             output_path = args.output
         img.save(output_path)
         print(f"Saved: {output_path}")
+
+
+def _run_vae_reconstruction(args: argparse.Namespace) -> None:
+    """Run VAE reconstruction."""
+    from src.inference.vae_inference import reconstruct_vae
+
+    if args.input is None:
+        print("Error: --input required for --reconstruct-vae")
+        return
+
+    reconstruct_vae(
+        input_path=args.input,
+        output_path=args.output,
+        checkpoint=args.vae_checkpoint,
+    )
 
 
 def _run_demo(args: argparse.Namespace) -> None:

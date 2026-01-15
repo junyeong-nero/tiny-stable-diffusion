@@ -339,6 +339,24 @@ uv run main.py --generate \
     --output my_image.png
 ```
 
+### VAE Reconstruction
+
+Test VAE quality by reconstructing images:
+
+```bash
+# Single image reconstruction
+uv run main.py --reconstruct-vae \
+    --input samples/original/sample_000_cattle.png \
+    --output samples/reconstructed.png \
+    --vae-checkpoint checkpoints/vae.pt
+
+# Using the convenience script
+./scripts/inference-vae.sh samples/original/sample_000_cattle.png
+
+# Batch reconstruct all sample images
+./scripts/inference-vae.sh --all
+```
+
 ### Interactive Demo
 
 ```bash
@@ -476,7 +494,8 @@ tiny-stable-diffusion/
 │   │   └── checkpoint.py           # Checkpoint management
 │   │
 │   ├── inference/
-│   │   └── generator.py            # Image generation
+│   │   ├── generator.py            # Image generation
+│   │   └── vae_inference.py        # VAE reconstruction
 │   │
 │   ├── text_encoder/
 │   │   └── clip_encoder.py         # CLIP text encoder
@@ -497,8 +516,17 @@ tiny-stable-diffusion/
 │   └── diffusion.pt                # Diffusion checkpoint
 │
 ├── samples/                        # Generated samples
-│   ├── vae_epoch_N/                # VAE reconstruction
+│   ├── original/                   # Original sample images (64x64)
+│   ├── vae_reconstructed/          # VAE reconstruction outputs
+│   ├── vae_epoch_N/                # VAE training samples
 │   └── epoch_N/                    # Diffusion generation results
+│
+├── scripts/                        # Utility scripts
+│   ├── inference-vae.sh            # VAE inference script
+│   ├── inference-diffusion.sh      # Diffusion inference script
+│   ├── train-vae.sh                # VAE training script
+│   ├── train-diffusion.sh          # Diffusion training script
+│   └── download-samples.py         # Download sample images
 │
 └── tests/                          # Test code
 ```
@@ -526,9 +554,11 @@ Training:
 
 Generation:
   --generate            Generate images
+  --reconstruct-vae     Reconstruct image through VAE
   --demo                Interactive demo
 
   --prompt TEXT         Prompt (comma-separated)
+  --input PATH          Input image (for --reconstruct-vae)
   --num-samples N       Samples per prompt
   --steps N             Diffusion steps (default: 50)
   --guidance F          CFG scale (default: 7.5)

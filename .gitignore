@@ -21,6 +21,7 @@ assets/
 output*.png
 *.png
 !docs/**/*.png
+!samples/original/sample_*.png
 
 # Python-generated files
 __pycache__/
