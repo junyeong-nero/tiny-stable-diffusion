@@ -40,7 +40,7 @@ vae_train:
 
     # KL Annealing settings (Cyclical Annealing Schedule)
     # Reference: "Cyclical Annealing Schedule: A Simple Approach to Mitigating KL Vanishing"
-    kl_weight: 0.5 # Maximum KL weight (target value)
+    kl_weight: 4.0 # Maximum KL weight (beta > 1 for disentanglement per beta-VAE paper)
     kl_annealing: cyclical # Options: "none", "linear", "cyclical"
     kl_n_cycles: 4 # Number of cycles for cyclical annealing
     kl_cycle_ratio: 0.5 # Proportion of cycle spent increasing (rest at max)
