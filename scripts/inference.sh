@@ -1,1 +1,0 @@
-uv run main.py --generate --prompt "a cute cat sitting on a couch"

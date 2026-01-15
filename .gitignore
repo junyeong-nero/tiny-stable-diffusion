@@ -38,3 +38,4 @@ wheels/
 *.tmp
 *.log
 /tmp/
+scripts/download.sh
