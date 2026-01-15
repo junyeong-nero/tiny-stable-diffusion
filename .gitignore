@@ -18,7 +18,6 @@ data/*
 
 # Generated images and samples
 assets/
-samples/
 output*.png
 *.png
 !docs/**/*.png
