@@ -49,6 +49,8 @@ def main() -> None:
     # Generation arguments
     parser.add_argument("--prompt", type=str, default=None, help="Prompt for generation")
     parser.add_argument("--input", type=str, default=None, help="Input image path (for --reconstruct-vae)")
+    parser.add_argument("--input-dir", type=str, default=None, help="Input directory for batch VAE reconstruction")
+    parser.add_argument("--output-dir", type=str, default=None, help="Output directory for batch VAE reconstruction")
     parser.add_argument("--num-samples", type=int, default=1, help="Number of samples to generate")
     parser.add_argument("--steps", type=int, default=50, help="Number of diffusion steps")
     parser.add_argument("--guidance", type=float, default=7.5, help="Guidance scale")
@@ -245,10 +247,21 @@ def _run_generation(args: argparse.Namespace) -> None:
 
 def _run_vae_reconstruction(args: argparse.Namespace) -> None:
     """Run VAE reconstruction."""
-    from src.inference.vae_inference import reconstruct_vae
+    from src.inference.vae_inference import reconstruct_vae, reconstruct_vae_batch
 
+    # Batch mode
+    if args.input_dir is not None:
+        output_dir = args.output_dir or "samples/vae_reconstructed"
+        reconstruct_vae_batch(
+            input_dir=args.input_dir,
+            output_dir=output_dir,
+            checkpoint=args.vae_checkpoint,
+        )
+        return
+
+    # Single image mode
     if args.input is None:
-        print("Error: --input required for --reconstruct-vae")
+        print("Error: --input or --input-dir required for --reconstruct-vae")
         return
 
     reconstruct_vae(

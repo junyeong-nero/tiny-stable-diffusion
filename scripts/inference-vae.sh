@@ -24,26 +24,10 @@ if [ "$1" = "--all" ]; then
     echo "Checkpoint: $VAE_CHECKPOINT"
     echo ""
 
-    OUTPUT_DIR="samples/vae_reconstructed"
-    mkdir -p "$OUTPUT_DIR"
-
-    count=0
-    for img in samples/original/sample_*.png; do
-        if [ -f "$img" ]; then
-            filename=$(basename "$img")
-            output="$OUTPUT_DIR/$filename"
-            echo "[$((count + 1))] Processing: $filename"
-            uv run main.py --reconstruct-vae \
-                --input "$img" \
-                --output "$output" \
-                --vae-checkpoint "$VAE_CHECKPOINT"
-            count=$((count + 1))
-        fi
-    done
-
-    echo ""
-    echo "Done! Processed $count images."
-    echo "Reconstructions saved to: $OUTPUT_DIR/"
+    uv run main.py --reconstruct-vae \
+        --input-dir "samples/original" \
+        --output-dir "samples/vae_reconstructed" \
+        --vae-checkpoint "$VAE_CHECKPOINT"
 else
     INPUT_IMAGE="${1:-samples/original/sample_000_cattle.png}"
     OUTPUT_IMAGE="${2:-samples/vae_reconstructed.png}"

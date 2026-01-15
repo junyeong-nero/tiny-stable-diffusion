@@ -559,6 +559,8 @@ Generation:
 
   --prompt TEXT         Prompt (comma-separated)
   --input PATH          Input image (for --reconstruct-vae)
+  --input-dir PATH      Input directory for batch VAE reconstruction
+  --output-dir PATH     Output directory for batch VAE reconstruction
   --num-samples N       Samples per prompt
   --steps N             Diffusion steps (default: 50)
   --guidance F          CFG scale (default: 7.5)
