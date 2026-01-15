@@ -359,6 +359,18 @@ uv run main.py --reconstruct-vae \
 
 ### Interactive Demo
 
+#### Streamlit Web UI (Recommended)
+
+```bash
+uv run streamlit run src/demo/app.py
+```
+
+Features:
+- **VAE Reconstruction**: Upload an image to see how the VAE encodes and reconstructs it
+- **Text-to-Image Generation**: Generate images from text prompts with adjustable parameters
+
+#### CLI Demo
+
 ```bash
 uv run main.py --demo
 ```
@@ -496,6 +508,9 @@ tiny-stable-diffusion/
 │   ├── inference/
 │   │   ├── generator.py            # Image generation
 │   │   └── vae_inference.py        # VAE reconstruction
+│   │
+│   ├── demo/
+│   │   └── app.py                  # Streamlit web demo
 │   │
 │   ├── text_encoder/
 │   │   └── clip_encoder.py         # CLIP text encoder

@@ -210,3 +210,94 @@ def reconstruct_vae_batch(
     
     print(f"Saved {len(results)} reconstructions to {output_dir}")
     return results
+
+
+@torch.no_grad()
+def decode_random_latent(
+    output_path: str | Path,
+    checkpoint: str | Path | None = None,
+    num_samples: int = 16,
+    seed: int | None = None,
+    latent_scale: float = 1.0,
+    device: str = "auto",
+) -> list[Image.Image]:
+    """Generate images from random latent vectors using VAE decoder only.
+
+    This is useful for testing if the VAE decoder can produce meaningful images
+    from random noise in the latent space.
+
+    Args:
+        output_path: Path to save generated images (grid or individual)
+        checkpoint: Path to VAE checkpoint (auto-detects if None)
+        num_samples: Number of images to generate (default: 16)
+        seed: Random seed for reproducibility (optional)
+        latent_scale: Scale factor for random latent vectors (default: 1.0)
+        device: Device to use ("auto", "cuda", "mps", "cpu")
+
+    Returns:
+        List of generated PIL images
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Set seed if provided
+    if seed is not None:
+        torch.manual_seed(seed)
+        print(f"Using seed: {seed}")
+
+    # Load VAE
+    vae, image_size, device, ckpt_path, epoch = _load_vae(checkpoint, device)
+    print(f"Using device: {device}")
+    print(f"Loaded VAE from {ckpt_path} (epoch {epoch})")
+
+    # Get latent dimensions from config
+    config = get_config("vae_train")
+    latent_channels = config.get("latent_channels", 16)
+    latent_size = image_size // 8  # f8 compression
+
+    print(f"Generating {num_samples} images from random latent vectors")
+    print(f"Latent shape: ({latent_channels}, {latent_size}, {latent_size})")
+    print(f"Latent scale: {latent_scale}")
+
+    # Generate random latent vectors (standard normal distribution)
+    z = torch.randn(num_samples, latent_channels, latent_size, latent_size, device=device)
+    z = z * latent_scale
+
+    # Decode latent to images
+    print("Decoding latent vectors...")
+    images = vae.decode_from_latent(z)
+
+    # Post-process: [-1, 1] -> [0, 1] -> PIL
+    images = (images + 1) / 2
+    images = images.clamp(0, 1)
+
+    results = []
+    for i in range(num_samples):
+        img_tensor = images[i].permute(1, 2, 0).cpu().numpy()
+        img_array = (img_tensor * 255).astype("uint8")
+        results.append(Image.fromarray(img_array))
+
+    # Save individual images if output_path is a directory or ends with /
+    if output_path.suffix == "" or str(output_path).endswith("/"):
+        output_dir = output_path
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for i, img in enumerate(results):
+            img_path = output_dir / f"random_latent_{i:03d}.png"
+            img.save(img_path)
+        print(f"Saved {num_samples} individual images to {output_dir}")
+    else:
+        # Save as grid
+        grid_size = int(num_samples**0.5)
+        while grid_size * grid_size < num_samples:
+            grid_size += 1
+
+        grid_img = Image.new("RGB", (grid_size * image_size, grid_size * image_size))
+        for i, img in enumerate(results):
+            x = (i % grid_size) * image_size
+            y = (i // grid_size) * image_size
+            grid_img.paste(img, (x, y))
+
+        grid_img.save(output_path)
+        print(f"Saved grid image to: {output_path}")
+
+    return results
