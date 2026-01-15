@@ -37,7 +37,7 @@ vae_train:
     epochs: 100
     batch_size: 256
     learning_rate: 4.0e-4
-    kl_weight: 1.0e-6 # Beta-VAE weight
+    kl_weight: 1.0e-4 # Beta-VAE weight (higher for better latent regularization)
 
     # Training settings
     mixed_precision: false

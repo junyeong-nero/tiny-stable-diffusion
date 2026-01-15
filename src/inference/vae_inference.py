@@ -212,6 +212,58 @@ def reconstruct_vae_batch(
     return results
 
 
+def _compute_latent_statistics(
+    vae,
+    reference_dir: Path,
+    image_size: int,
+    device,
+    max_images: int = 100,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute mean and std of latent space from reference images.
+
+    Args:
+        vae: VAE model
+        reference_dir: Directory containing reference images
+        image_size: Image size for preprocessing
+        device: Device to use
+        max_images: Maximum number of images to use for statistics
+
+    Returns:
+        Tuple of (mean, std) tensors with shape (latent_channels,)
+    """
+    transform = T.Compose([
+        T.Resize((image_size, image_size)),
+        T.ToTensor(),
+        T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+    ])
+
+    # Find reference images
+    image_files = list(reference_dir.glob("*.png")) + list(reference_dir.glob("*.jpg"))
+    if not image_files:
+        raise FileNotFoundError(f"No images found in {reference_dir}")
+
+    image_files = image_files[:max_images]
+    print(f"Computing latent statistics from {len(image_files)} reference images...")
+
+    # Encode all images and collect latent vectors
+    all_latents = []
+    for img_path in image_files:
+        img = Image.open(img_path).convert("RGB")
+        x = transform(img).unsqueeze(0).to(device)
+        mean, _ = vae.encode(x)
+        all_latents.append(mean)
+
+    # Concatenate all latents: (N, C, H, W)
+    latents = torch.cat(all_latents, dim=0)
+
+    # Compute per-channel mean and std across all spatial locations and images
+    # Shape: (N, C, H, W) -> compute stats over (N, H, W) for each channel
+    latent_mean = latents.mean(dim=(0, 2, 3))  # (C,)
+    latent_std = latents.std(dim=(0, 2, 3))    # (C,)
+
+    return latent_mean, latent_std
+
+
 @torch.no_grad()
 def decode_random_latent(
     output_path: str | Path,
@@ -219,19 +271,23 @@ def decode_random_latent(
     num_samples: int = 16,
     seed: int | None = None,
     latent_scale: float = 1.0,
+    reference_dir: str | Path | None = None,
     device: str = "auto",
 ) -> list[Image.Image]:
     """Generate images from random latent vectors using VAE decoder only.
 
-    This is useful for testing if the VAE decoder can produce meaningful images
-    from random noise in the latent space.
+    Samples random latent vectors from the distribution learned by the VAE encoder.
+    The mean and std are computed from reference images to ensure samples are
+    within the valid latent space range.
 
     Args:
         output_path: Path to save generated images (grid or individual)
         checkpoint: Path to VAE checkpoint (auto-detects if None)
         num_samples: Number of images to generate (default: 16)
         seed: Random seed for reproducibility (optional)
-        latent_scale: Scale factor for random latent vectors (default: 1.0)
+        latent_scale: Scale factor for random latent std (default: 1.0)
+        reference_dir: Directory with reference images for latent statistics
+                      (default: samples/original)
         device: Device to use ("auto", "cuda", "mps", "cpu")
 
     Returns:
@@ -255,13 +311,30 @@ def decode_random_latent(
     latent_channels = config.get("latent_channels", 16)
     latent_size = image_size // 8  # f8 compression
 
+    # Compute latent statistics from reference images
+    if reference_dir is None:
+        reference_dir = Path("samples/original")
+    else:
+        reference_dir = Path(reference_dir)
+
+    latent_mean, latent_std = _compute_latent_statistics(
+        vae, reference_dir, image_size, device
+    )
+
+    print(f"Latent statistics - Mean range: [{latent_mean.min():.3f}, {latent_mean.max():.3f}]")
+    print(f"Latent statistics - Std range: [{latent_std.min():.3f}, {latent_std.max():.3f}]")
+
     print(f"Generating {num_samples} images from random latent vectors")
     print(f"Latent shape: ({latent_channels}, {latent_size}, {latent_size})")
     print(f"Latent scale: {latent_scale}")
 
-    # Generate random latent vectors (standard normal distribution)
+    # Generate random latent vectors from learned distribution
+    # z = mean + std * scale * noise
     z = torch.randn(num_samples, latent_channels, latent_size, latent_size, device=device)
-    z = z * latent_scale
+    # Reshape mean and std for broadcasting: (C,) -> (1, C, 1, 1)
+    latent_mean = latent_mean.view(1, -1, 1, 1)
+    latent_std = latent_std.view(1, -1, 1, 1)
+    z = latent_mean + latent_std * latent_scale * z
 
     # Decode latent to images
     print("Decoding latent vectors...")

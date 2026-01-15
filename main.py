@@ -35,6 +35,7 @@ def main() -> None:
     parser.add_argument("--train", action="store_true", help="Train using config.yaml settings")
     parser.add_argument("--generate", action="store_true", help="Generate images from prompts")
     parser.add_argument("--reconstruct-vae", action="store_true", help="Reconstruct image through VAE")
+    parser.add_argument("--decode-random", action="store_true", help="Generate images from random latent vectors (VAE decoder only)")
     parser.add_argument("--demo", action="store_true", help="Run interactive demo")
 
     # Training arguments
@@ -56,6 +57,8 @@ def main() -> None:
     parser.add_argument("--guidance", type=float, default=7.5, help="Guidance scale")
     parser.add_argument("--output", type=str, default="output.png", help="Output file path")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
+    parser.add_argument("--latent-scale", type=float, default=1.0, help="Scale for random latent vectors")
+    parser.add_argument("--reference-dir", type=str, default=None, help="Reference images dir for latent statistics")
 
     # Wandb arguments
     parser.add_argument("--wandb", action="store_true", help="Enable wandb logging")
@@ -87,6 +90,9 @@ def main() -> None:
 
     elif args.reconstruct_vae:
         _run_vae_reconstruction(args)
+
+    elif args.decode_random:
+        _run_decode_random(args)
 
     elif args.demo:
         _run_demo(args)
@@ -268,6 +274,20 @@ def _run_vae_reconstruction(args: argparse.Namespace) -> None:
         input_path=args.input,
         output_path=args.output,
         checkpoint=args.vae_checkpoint,
+    )
+
+
+def _run_decode_random(args: argparse.Namespace) -> None:
+    """Generate images from random latent vectors using VAE decoder only."""
+    from src.inference.vae_inference import decode_random_latent
+
+    decode_random_latent(
+        output_path=args.output,
+        checkpoint=args.vae_checkpoint,
+        num_samples=args.num_samples,
+        seed=args.seed,
+        latent_scale=args.latent_scale,
+        reference_dir=args.reference_dir,
     )
 
 

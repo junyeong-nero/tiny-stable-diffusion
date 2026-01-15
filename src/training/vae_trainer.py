@@ -55,6 +55,8 @@ def train_vae_one_epoch(
     epoch_loss = 0.0
     epoch_recon_loss = 0.0
     epoch_kl_loss = 0.0
+    epoch_latent_mean = 0.0
+    epoch_latent_std = 0.0
     num_batches = 0
 
     progress_bar = tqdm(dataloader, desc="VAE Training")
@@ -84,12 +86,17 @@ def train_vae_one_epoch(
         epoch_loss += loss_dict["total_loss"]
         epoch_recon_loss += loss_dict["recon_loss"]
         epoch_kl_loss += loss_dict["kl_loss"]
+        epoch_latent_mean += loss_dict["latent_mean"]
+        epoch_latent_std += loss_dict["latent_std"]
 
+        # Show latent stats in progress bar (μ should → 0, σ should → 1)
         progress_bar.set_postfix(
             {
                 "loss": f"{loss_dict['total_loss']:.4f}",
                 "recon": f"{loss_dict['recon_loss']:.4f}",
-                "kl": f"{loss_dict['kl_loss']:.4f}",
+                "kl": f"{loss_dict['kl_loss']:.2f}",
+                "μ": f"{loss_dict['latent_mean']:.2f}",
+                "σ": f"{loss_dict['latent_std']:.3f}",
             }
         )
 
@@ -101,6 +108,11 @@ def train_vae_one_epoch(
                     "vae/kl_loss": loss_dict["kl_loss"],
                     "vae/learning_rate": scheduler.get_last_lr()[0],
                     "vae/global_step": global_step,
+                    # Latent space statistics
+                    "latent/mean": loss_dict["latent_mean"],
+                    "latent/mean_std": loss_dict["latent_mean_std"],
+                    "latent/std": loss_dict["latent_std"],
+                    "latent/std_std": loss_dict["latent_std_std"],
                 },
                 step=global_step,
             )
@@ -287,7 +299,21 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
             global_step=global_step,
         )
 
-        print(f"Epoch {epoch + 1}/{config['epochs']}: Avg Loss = {avg_loss:.4f}")
+        # Log epoch summary with latent stats
+        with torch.no_grad():
+            # Get a batch to compute latent statistics
+            sample_batch = next(iter(dataloader))
+            sample_images = sample_batch["image"].to(device)
+            mean, logvar = model.encode(sample_images)
+            std = torch.exp(0.5 * logvar)
+
+            latent_mean = mean.mean().item()
+            latent_mean_std = mean.std().item()
+            latent_std = std.mean().item()
+
+        print(f"Epoch {epoch + 1}/{config['epochs']}: Loss={avg_loss:.4f} | "
+              f"Latent μ={latent_mean:.3f} (std={latent_mean_std:.3f}), σ={latent_std:.3f} "
+              f"[target: μ≈0, σ≈1]")
 
         # Log epoch metrics to wandb
         if use_wandb and WANDB_AVAILABLE:
@@ -295,6 +321,9 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
                 {
                     "epoch/vae_loss": avg_loss,
                     "epoch/epoch": epoch + 1,
+                    "epoch/latent_mean": latent_mean,
+                    "epoch/latent_mean_std": latent_mean_std,
+                    "epoch/latent_std": latent_std,
                 },
                 step=global_step,
             )

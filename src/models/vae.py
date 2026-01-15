@@ -310,7 +310,7 @@ class AutoencoderKL(nn.Module):
             kl_weight: Weight for KL divergence loss (beta-VAE style)
 
         Returns:
-            Tuple of (total_loss, loss_dict with individual components)
+            Tuple of (total_loss, loss_dict with individual components and latent stats)
         """
         # Forward pass
         reconstruction, mean, logvar = self.forward(x, sample_posterior=True)
@@ -325,10 +325,18 @@ class AutoencoderKL(nn.Module):
         # Total loss
         total_loss = recon_loss + kl_weight * kl_loss
 
+        # Compute latent statistics for monitoring
+        std = torch.exp(0.5 * logvar)
+
         loss_dict = {
             "total_loss": total_loss.item(),
             "recon_loss": recon_loss.item(),
             "kl_loss": kl_loss.item(),
+            # Latent space statistics (should converge to mean≈0, std≈1)
+            "latent_mean": mean.mean().item(),
+            "latent_mean_std": mean.std().item(),
+            "latent_std": std.mean().item(),
+            "latent_std_std": std.std().item(),
         }
 
         return total_loss, loss_dict
