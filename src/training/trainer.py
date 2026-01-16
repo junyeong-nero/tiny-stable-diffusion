@@ -257,7 +257,16 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
     vae.eval()
     for param in vae.parameters():
         param.requires_grad = False
-    print("VAE loaded and frozen")
+
+    # Set scaling factor for latent normalization
+    scaling_factor_config = config.get("scaling_factor", 1.0)
+    if scaling_factor_config == "auto":
+        print("Computing scaling factor from dataset...")
+        scaling_factor = vae.compute_scaling_factor(dataloader, num_batches=100)
+        vae.set_scaling_factor(scaling_factor)
+    elif isinstance(scaling_factor_config, (int, float)):
+        vae.set_scaling_factor(float(scaling_factor_config))
+    print(f"VAE loaded and frozen (scaling_factor={vae.scaling_factor:.4f})")
 
     # Load CLIP encoder
     print("Loading CLIP text encoder...")
@@ -428,6 +437,7 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
             config=config,
             ema=ema,
             global_step=global_step,
+            scaling_factor=vae.scaling_factor,
         )
         if avg_loss < best_loss:
             best_loss = avg_loss

@@ -83,6 +83,11 @@ diffusion_train:
     # VAE checkpoint (required)
     vae_checkpoint: checkpoints/vae.pt
 
+    # VAE scaling factor for latent normalization
+    # SD3 uses ~1.5305, set to 1.0 to disable, or "auto" to compute from data
+    # Scales latent space to have std ≈ 1 for stable diffusion training
+    scaling_factor: auto
+
     # Checkpoint
     checkpoint_path: checkpoints/diffusion.pt
     checkpoint_dir: checkpoints

@@ -22,6 +22,7 @@ def save_checkpoint(
     ema: EMA | None = None,
     global_step: int = 0,
     wandb_run_id: str | None = None,
+    scaling_factor: float | None = None,
 ) -> None:
     """Save training checkpoint.
 
@@ -35,6 +36,7 @@ def save_checkpoint(
         config: Training configuration
         ema: EMA state (optional)
         wandb_run_id: Wandb run ID for resuming (optional)
+        scaling_factor: VAE scaling factor for latent normalization (optional)
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,6 +57,10 @@ def save_checkpoint(
             "register_tokens": config.get("register_tokens", 0),
         },
     }
+
+    # Save scaling factor if provided
+    if scaling_factor is not None:
+        checkpoint["model_config"]["scaling_factor"] = scaling_factor
 
     if ema is not None:
         checkpoint["ema_state_dict"] = ema.state_dict()

@@ -248,9 +248,11 @@ class AutoencoderKL(nn.Module):
         ch=128,
         ch_mult=(1, 2, 4, 4),
         num_res_blocks=2,
+        scaling_factor: float = 1.0,
     ):
         super().__init__()
         self.z_channels = z_channels
+        self.scaling_factor = scaling_factor
 
         self.encoder = Encoder(
             ch=ch,
@@ -346,27 +348,76 @@ class AutoencoderKL(nn.Module):
         """Encode images to latent space (for diffusion training).
 
         Uses mean (deterministic) encoding for stable diffusion training.
+        Applies scaling_factor to normalize latent variance to ~1.
 
         Args:
             x: Input images (B, C, H, W) normalized to [-1, 1]
 
         Returns:
-            Latent tensor (B, z_channels, H/8, W/8)
+            Latent tensor (B, z_channels, H/8, W/8) scaled by scaling_factor
         """
         mean, _ = self.encode(x)
-        return mean
+        return mean * self.scaling_factor
 
     @torch.no_grad()
     def decode_from_latent(self, z: torch.Tensor) -> torch.Tensor:
         """Decode latent to images (for generation).
 
+        Reverses the scaling_factor applied during encoding.
+
         Args:
-            z: Latent tensor (B, z_channels, H/8, W/8)
+            z: Latent tensor (B, z_channels, H/8, W/8) scaled by scaling_factor
 
         Returns:
             Decoded images (B, C, H, W) in [-1, 1]
         """
-        return self.decode(z)
+        return self.decode(z / self.scaling_factor)
+
+    @torch.no_grad()
+    def compute_scaling_factor(
+        self, dataloader: "torch.utils.data.DataLoader", num_batches: int = 100
+    ) -> float:
+        """Compute scaling factor from dataset.
+
+        The scaling factor is 1/std of the latent space, which normalizes
+        the latent variance to ~1 for diffusion training.
+
+        SD3 uses scaling_factor ≈ 1.5305 (corresponding to latent std ≈ 0.6534).
+
+        Args:
+            dataloader: DataLoader with images (expects 'image' key in batch)
+            num_batches: Number of batches to compute statistics from
+
+        Returns:
+            Computed scaling factor (1 / latent_std)
+        """
+        device = next(self.parameters()).device
+        all_latents = []
+
+        for i, batch in enumerate(dataloader):
+            if i >= num_batches:
+                break
+            images = batch["image"].to(device)
+            mean, _ = self.encode(images)
+            all_latents.append(mean)
+
+        all_latents = torch.cat(all_latents, dim=0)
+        latent_std = all_latents.std().item()
+
+        # scaling_factor = 1 / std, so scaled latents have std ≈ 1
+        scaling_factor = 1.0 / latent_std if latent_std > 0 else 1.0
+
+        print(f"Computed scaling_factor: {scaling_factor:.4f} (latent std: {latent_std:.4f})")
+        return scaling_factor
+
+    def set_scaling_factor(self, scaling_factor: float) -> None:
+        """Set the scaling factor for latent space normalization.
+
+        Args:
+            scaling_factor: New scaling factor value
+        """
+        self.scaling_factor = scaling_factor
+        print(f"Set scaling_factor to {scaling_factor:.4f}")
 
 
 def create_vae(

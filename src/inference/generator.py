@@ -108,6 +108,14 @@ def generate(
     vae = vae.to(device)
     vae.eval()
 
+    # Set scaling factor from config or checkpoint
+    scaling_factor = model_config.get("scaling_factor", 1.0)
+    if isinstance(scaling_factor, (int, float)) and scaling_factor != "auto":
+        vae.set_scaling_factor(float(scaling_factor))
+    elif "scaling_factor" in vae_state:
+        vae.set_scaling_factor(vae_state["scaling_factor"])
+    print(f"VAE scaling_factor: {vae.scaling_factor:.4f}")
+
     # Load DiT model
     print(f"Initializing DiT-{model_size} ({model_type}) for latent space...")
     print(f"  Latent size: {latent_size}x{latent_size}")
@@ -233,6 +241,13 @@ def demo(
     vae.load_state_dict(vae_state["model_state_dict"])
     vae = vae.to(device)
     vae.eval()
+
+    # Set scaling factor from config or checkpoint
+    scaling_factor = model_config.get("scaling_factor", 1.0)
+    if isinstance(scaling_factor, (int, float)) and scaling_factor != "auto":
+        vae.set_scaling_factor(float(scaling_factor))
+    elif "scaling_factor" in vae_state:
+        vae.set_scaling_factor(vae_state["scaling_factor"])
 
     # Load DiT model
     model = DiT(
