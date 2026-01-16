@@ -1,4 +1,4 @@
-"""Configuration module for text-to-emoji."""
+"""Configuration module for tiny-stable-diffusion."""
 
 from src.config.dataclasses import (
     DataConfig,

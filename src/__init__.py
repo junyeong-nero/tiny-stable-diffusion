@@ -1,4 +1,4 @@
-"""text-to-emoji: Text-to-Pixel Art Generator using Diffusion Transformer (DiT).
+"""tiny-stable-diffusion: Educational Stable Diffusion 3 implementation.
 
 Project Structure:
     src/

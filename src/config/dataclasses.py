@@ -1,4 +1,4 @@
-"""Configuration dataclasses for text-to-emoji."""
+"""Configuration dataclasses for tiny-stable-diffusion."""
 
 from __future__ import annotations
 

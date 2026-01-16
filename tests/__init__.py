@@ -1,1 +1,1 @@
-"""Test suite for text-to-emoji."""
+"""Test suite for tiny-stable-diffusion."""

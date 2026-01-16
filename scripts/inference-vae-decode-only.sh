@@ -17,7 +17,7 @@
 
 set -e
 
-VAE_CHECKPOINT="${VAE_CHECKPOINT:-checkpoints/vae_e30.pt}"
+VAE_CHECKPOINT="${VAE_CHECKPOINT:-checkpoints/vae.pt}"
 REFERENCE_DIR="${REFERENCE_DIR:-samples/original}"
 NUM_SAMPLES="${NUM_SAMPLES:-16}"
 SEED=""
