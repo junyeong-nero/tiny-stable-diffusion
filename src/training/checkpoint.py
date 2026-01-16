@@ -21,6 +21,7 @@ def save_checkpoint(
     config: dict[str, Any],
     ema: EMA | None = None,
     global_step: int = 0,
+    wandb_run_id: str | None = None,
 ) -> None:
     """Save training checkpoint.
 
@@ -33,6 +34,7 @@ def save_checkpoint(
         path: Path to save checkpoint
         config: Training configuration
         ema: EMA state (optional)
+        wandb_run_id: Wandb run ID for resuming (optional)
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,6 +58,9 @@ def save_checkpoint(
 
     if ema is not None:
         checkpoint["ema_state_dict"] = ema.state_dict()
+
+    if wandb_run_id is not None:
+        checkpoint["wandb_run_id"] = wandb_run_id
 
     torch.save(checkpoint, path)
     print(f"Saved checkpoint: {path}")
@@ -104,6 +109,7 @@ def load_checkpoint(
         "loss": checkpoint.get("loss", float("inf")),
         "global_step": checkpoint.get("global_step", 0),
         "model_config": checkpoint.get("model_config", {}),
+        "wandb_run_id": checkpoint.get("wandb_run_id"),
     }
 
 

@@ -245,6 +245,15 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
     print()
 
     # Initialize wandb
+    resume = config.get("resume", False)
+    checkpoint_path = Path(config["checkpoint_path"])
+    wandb_run_id = None
+
+    # Load wandb_run_id from checkpoint if resuming
+    if resume and checkpoint_path.exists():
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        wandb_run_id = checkpoint.get("wandb_run_id")
+
     if use_wandb:
         if not WANDB_AVAILABLE:
             print("Warning: wandb not installed. Disabling wandb logging.")
@@ -254,8 +263,12 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
                 project=config.get("wandb_project", "tiny-stable-diffusion"),
                 name=config.get("wandb_run_name", "vae-training"),
                 config=config,
+                id=wandb_run_id,
+                resume="allow" if wandb_run_id else None,
             )
-            print("Wandb logging enabled")
+            # Save run id for future resume
+            wandb_run_id = wandb.run.id
+            print(f"Wandb logging enabled (run_id: {wandb_run_id})")
 
     set_seed(config["seed"])
     device = get_device(config["device"])
@@ -324,8 +337,6 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
     start_epoch = 0
     global_step = 0
     best_loss = float("inf")
-    resume = config.get("resume", False)
-    checkpoint_path = Path(config["checkpoint_path"])
 
     if resume and checkpoint_path.exists():
         print(f"\nResuming training from checkpoint: {checkpoint_path}")
@@ -440,6 +451,7 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
             path=checkpoint_path,
             config=config,
             global_step=global_step,
+            wandb_run_id=wandb_run_id,
         )
         if avg_loss < best_loss:
             best_loss = avg_loss
