@@ -62,9 +62,9 @@ diffusion_train:
     model_type: mmdit
     # Data source: "huggingface" for HF datasets, "streaming_caption" for large URL-based datasets
     data_source: huggingface
-    dataset_name: visual-layer/oxford-iiit-pet-vl-enriched
+    dataset_name: visual-layer/oxford-iiit-pet-vl-enriched # Oxford Pets dataset (cats & dogs)
     image_field: image
-    caption_field: caption_enriched
+    caption_field: caption_enriched # Enriched captions with detailed descriptions
     split: train
 
     # Image and latent settings
@@ -76,9 +76,12 @@ diffusion_train:
     epochs: 200
     batch_size: 256
     learning_rate: 1.0e-4
-    initial_cfg_prob: 0.0
-    final_cfg_prob: 0.1
-    cfg_warmup_epochs: 10
+
+    # CFG (Classifier-Free Guidance) dropout probability
+    # Gradually increases from initial to final over warmup epochs
+    initial_cfg_prob: 0.0 # Start with no unconditional dropout
+    final_cfg_prob: 0.1 # 10% unconditional dropout after warmup
+    cfg_warmup_epochs: 10 # Number of epochs to reach final_cfg_prob
 
     # VAE checkpoint (required)
     vae_checkpoint: checkpoints/vae.pt
@@ -94,8 +97,11 @@ diffusion_train:
     resume: false # Set to true to resume training from checkpoint
 
     # DiT/MMDiT model configuration
-    model_size: B # Options: S (30M), B (130M), L (300M), XL (675M)
-    patch_size: 2
+    # Model sizes (approximate params):
+    #   DiT:   S=40M, B=159M, L=559M, XL=824M
+    #   MMDiT: S=87M, B=187M, L=559M, XL=780M
+    model_size: B
+    patch_size: 2 # Patch size for image tokenization
 
     # Diffusion settings (Rectified Flow)
     num_timesteps: 1000
@@ -119,15 +125,15 @@ diffusion_train:
     num_workers: 4 # Number of worker processes for data loading (0 = main process only)
     prefetch_factor: 2 # Number of batches to prefetch per worker
 
-    # Validation
+    # Validation - prompts aligned with Oxford Pets dataset (cats & dogs)
     validation_prompts:
         - a photo of a fluffy Persian cat
         - a golden retriever sitting on grass
         - a black and white Border Collie
         - a cute tabby kitten playing
         - a Siamese cat with blue eyes
-    validation_interval: 10
-    sample_dir: samples
+    validation_interval: 10 # Generate samples every N epochs
+    sample_dir: samples # Directory to save generated samples
 
     # MMDiT-specific settings
     qk_rmsnorm: true
