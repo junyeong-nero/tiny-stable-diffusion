@@ -13,7 +13,10 @@ A lightweight implementation of Stable Diffusion 3 for learning purposes. Train 
 > **Prompt**: "a Siamese cat with blue eyes"
 
 <p align="center">
-  <img src="assets/siamese_cat_example.png" alt="Generated Siamese cat" width="256">
+  <img src="assets/sample_0.png" alt="Sample 0" width="128">
+  <img src="assets/sample_1.png" alt="Sample 1" width="128">
+  <img src="assets/sample_2.png" alt="Sample 2" width="128">
+  <img src="assets/sample_3.png" alt="Sample 3" width="128">
 </p>
 
 > ⚠️ **Note**: The current model is trained on [Oxford Pets dataset](https://huggingface.co/datasets/visual-layer/oxford-iiit-pet-vl-enriched) (7.4K images of cats & dogs). It works best with **pet-related prompts**.
