@@ -6,7 +6,7 @@
 #   ./scripts/inference-diffusion.sh [prompt] [output]
 #
 # Examples:
-#   ./scripts/inference-diffusion.sh "a cute cat"
+#   ./scripts/inference-diffusion.sh "a Siamese cat with blue eyes"
 #   ./scripts/inference-diffusion.sh "a robot with blue eyes" "robot.png"
 
 set -e

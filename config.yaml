@@ -52,6 +52,7 @@ vae_train:
 
     # Checkpoint
     checkpoint_path: checkpoints/vae.pt
+    checkpoint_interval: 10 # Save checkpoint every N epochs
     resume: false # Set to true to resume training from checkpoint
 
 # =============================================================================
@@ -94,6 +95,7 @@ diffusion_train:
     # Checkpoint
     checkpoint_path: checkpoints/diffusion.pt
     checkpoint_dir: checkpoints
+    checkpoint_interval: 10 # Save checkpoint every N epochs
     resume: false # Set to true to resume training from checkpoint
 
     # DiT/MMDiT model configuration

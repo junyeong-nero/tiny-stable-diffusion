@@ -456,6 +456,14 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
         if avg_loss < best_loss:
             best_loss = avg_loss
 
+        # Save periodic checkpoint every 10 epochs (weights only for minimal size)
+        checkpoint_interval = config.get("checkpoint_interval", 10)
+        if (epoch + 1) % checkpoint_interval == 0:
+            checkpoint_dir = checkpoint_path.parent
+            periodic_path = checkpoint_dir / f"vae_epoch_{epoch + 1}.pt"
+            torch.save({"model_state_dict": model.state_dict()}, periodic_path)
+            print(f"Saved periodic checkpoint: {periodic_path}")
+
         # Generate validation samples
         if (epoch + 1) % config.get("validation_interval", 10) == 0:
             print("\nGenerating VAE reconstruction samples...")

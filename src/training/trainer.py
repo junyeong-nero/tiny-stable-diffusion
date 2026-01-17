@@ -438,6 +438,17 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
         if avg_loss < best_loss:
             best_loss = avg_loss
 
+        # Save periodic checkpoint every 10 epochs (weights only for minimal size)
+        checkpoint_interval = config.get("checkpoint_interval", 10)
+        if (epoch + 1) % checkpoint_interval == 0:
+            checkpoint_dir = Path(config.get("checkpoint_dir", "checkpoints"))
+            periodic_path = checkpoint_dir / f"diffusion_epoch_{epoch + 1}.pt"
+            periodic_checkpoint = {"model_state_dict": model.state_dict()}
+            if ema is not None:
+                periodic_checkpoint["ema_state_dict"] = ema.state_dict()
+            torch.save(periodic_checkpoint, periodic_path)
+            print(f"Saved periodic checkpoint: {periodic_path}")
+
         # Generate validation samples
         if (epoch + 1) % config.get("validation_interval", 10) == 0:
             print("\nGenerating validation samples...")
