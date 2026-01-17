@@ -121,11 +121,11 @@ diffusion_train:
 
     # Validation
     validation_prompts:
-        - a photo of a cat
-        - a rocket flying in space
-        - a robot with blue eyes
-        - a beautiful sunset over the ocean
-        - a red sports car
+        - a photo of a fluffy Persian cat
+        - a golden retriever sitting on grass
+        - a black and white Border Collie
+        - a cute tabby kitten playing
+        - a Siamese cat with blue eyes
     validation_interval: 10
     sample_dir: samples
 
