@@ -60,8 +60,8 @@ vae_train:
 diffusion_train:
     # Model type: "dit" (Diffusion Transformer) or "mmdit" (Multi-Modal DiT from SD3)
     model_type: mmdit
-    # Data source: "huggingface" for local datasets, "streaming_caption" for large URL-based datasets
-    data_source: huggingface
+    # Data source: "caption" for general HF datasets, "streaming_caption" for large URL-based datasets
+    data_source: caption
     dataset_name: visual-layer/oxford-iiit-pet-vl-enriched
     image_field: image
     caption_field: caption_enriched
