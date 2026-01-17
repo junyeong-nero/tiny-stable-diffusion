@@ -1,11 +1,11 @@
-"""Data loading and preprocessing utilities."""
+"""Data loading utilities for tiny-stable-diffusion."""
 
-from src.data.dataset import CIFAR100Dataset, EmojiDataset
+from src.data.dataset import CaptionDataset, StreamingCaptionDataset
 from src.data.loader import create_dataloader, get_dataset
 
 __all__ = [
-    "EmojiDataset",
-    "CIFAR100Dataset",
+    "CaptionDataset",
+    "StreamingCaptionDataset",
     "get_dataset",
     "create_dataloader",
 ]

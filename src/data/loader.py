@@ -6,12 +6,7 @@ from typing import Any
 
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 
-from src.data.dataset import (
-    CIFAR100Dataset,
-    CaptionDataset,
-    EmojiDataset,
-    StreamingCaptionDataset,
-)
+from src.data.dataset import CaptionDataset, StreamingCaptionDataset
 
 
 def get_dataset(config: dict[str, Any]) -> Dataset:
@@ -28,66 +23,35 @@ def get_dataset(config: dict[str, Any]) -> Dataset:
     """
     data_source = config["data_source"]
 
-    if data_source == "local":
-        local_path = config.get("local_dataset_path")
-        print(f"Loading local dataset from: {local_path}")
-        return EmojiDataset(dataset_name=local_path, split="train")
-
-    elif data_source in ("huggingface", "caption"):
-        # General HuggingFace image-caption dataset
-        dataset_name = config.get("dataset_name", "junyeong-nero/emoji-32")
-        image_field = config.get("image_field", "image")
-        caption_field = config.get("caption_field", "caption")
-        target_size = config.get("image_size", 64)
-        streaming = config.get("streaming", False)
-        split = config.get("split", "train")
-        url_timeout = config.get("url_timeout", 10)
-        max_retries = config.get("max_retries", 3)
-
-        print(f"Loading HuggingFace dataset: {dataset_name}")
+    if data_source in ("huggingface", "caption"):
+        # HuggingFace image-caption dataset
         return CaptionDataset(
-            dataset_name=dataset_name,
-            split=split,
-            image_field=image_field,
-            caption_field=caption_field,
-            target_size=target_size,
-            streaming=streaming,
-            url_timeout=url_timeout,
-            max_retries=max_retries,
+            dataset_name=config.get("dataset_name", "reach-vb/pokemon-blip-captions"),
+            split=config.get("split", "train"),
+            image_field=config.get("image_field", "image"),
+            caption_field=config.get("caption_field", "caption"),
+            target_size=config.get("image_size", 64),
+            streaming=config.get("streaming", False),
+            url_timeout=config.get("url_timeout", 10),
+            max_retries=config.get("max_retries", 3),
         )
 
     elif data_source == "streaming_caption":
-        # Streaming dataset for very large datasets (LAION, Open Images, etc.)
-        dataset_name = config.get("dataset_name")
-        image_field = config.get("image_field", "image")
-        caption_field = config.get("caption_field", "caption")
-        target_size = config.get("image_size", 64)
-        split = config.get("split", "train")
-        url_timeout = config.get("url_timeout", 10)
-        max_retries = config.get("max_retries", 3)
-        skip_failures = config.get("skip_failures", True)
-        buffer_size = config.get("buffer_size", 1000)
-
-        print(f"Loading streaming caption dataset: {dataset_name}")
+        # Streaming dataset for very large datasets (LAION, etc.)
         return StreamingCaptionDataset(
-            dataset_name=dataset_name,
-            split=split,
-            image_field=image_field,
-            caption_field=caption_field,
-            target_size=target_size,
-            url_timeout=url_timeout,
-            max_retries=max_retries,
-            skip_failures=skip_failures,
-            buffer_size=buffer_size,
+            dataset_name=config.get("dataset_name"),
+            split=config.get("split", "train"),
+            image_field=config.get("image_field", "image"),
+            caption_field=config.get("caption_field", "caption"),
+            target_size=config.get("image_size", 64),
+            url_timeout=config.get("url_timeout", 10),
+            max_retries=config.get("max_retries", 3),
+            skip_failures=config.get("skip_failures", True),
+            buffer_size=config.get("buffer_size", 1000),
         )
 
-    elif data_source == "cifar100":
-        use_coarse = config.get("use_coarse_labels", False)
-        print("Loading CIFAR-100 dataset")
-        return CIFAR100Dataset(train=True, use_coarse_labels=use_coarse)
-
     else:
-        raise ValueError(f"Unknown data_source: {data_source}")
+        raise ValueError(f"Unknown data_source: {data_source}. Use 'huggingface' or 'streaming_caption'.")
 
 
 def create_dataloader(
@@ -109,7 +73,6 @@ def create_dataloader(
     Returns:
         DataLoader instance
     """
-    # IterableDataset does not support shuffle option
     if isinstance(dataset, IterableDataset):
         return DataLoader(
             dataset,

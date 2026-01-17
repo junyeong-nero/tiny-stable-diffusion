@@ -67,6 +67,11 @@ diffusion_train:
     image_field: image
     caption_field: caption_enriched # Enriched captions with detailed descriptions
     split: train
+    # Alternative datasets:
+    # - MSCOCO (general images, ~35k samples):
+    #     dataset_name: clip-benchmark/wds_mscoco_captions
+    #     image_field: jpg
+    #     caption_field: txt
 
     # Image and latent settings
     image_size: 64 # Original image size
