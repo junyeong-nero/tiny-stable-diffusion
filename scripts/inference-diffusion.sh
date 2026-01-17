@@ -12,7 +12,7 @@
 set -e
 
 DIFFUSION_CHECKPOINT="${DIFFUSION_CHECKPOINT:-checkpoints/diffusion.pt}"
-VAE_CHECKPOINT="${VAE_CHECKPOINT:-checkpoints/vae_e20.pt}"
+VAE_CHECKPOINT="${VAE_CHECKPOINT:-checkpoints/vae_e40.pt}"
 PROMPT="${1:-a photo of a cat}"
 OUTPUT="${2:-output.png}"
 STEPS="${STEPS:-50}"

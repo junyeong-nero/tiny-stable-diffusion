@@ -257,7 +257,7 @@ class FinalLayer(nn.Module):
 # Model size configurations
 MODEL_CONFIGS = {
     "S": {"layers": 12, "heads": 6, "hidden": 384},
-    "B": {"layers": 12, "heads": 12, "hidden": 768},
+    "B": {"layers": 12, "heads": 12, "hidden": 864},  # ~201M params for 1:10 VAE ratio
     "L": {"layers": 24, "heads": 16, "hidden": 1024},
     "XL": {"layers": 28, "heads": 16, "hidden": 1152},
 }
