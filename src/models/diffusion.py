@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Literal
 
 import torch
 import torch.nn as nn
+import tqdm
 
 if TYPE_CHECKING:
     from src.models.vae import AutoencoderKL
@@ -218,9 +219,8 @@ class Diffusion:
         if use_cfg and self.guidance_scale != 1.0 and self.uncond_embed is not None:
             # Get unconditional prediction using pre-computed uncond_embed
             uncond_embed = self.uncond_embed.to(x_t.device)
-            uncond_mask = self.uncond_mask.to(x_t.device) if self.uncond_mask is not None else None
             with torch.no_grad():
-                unconditional_noise = model(x_t, timesteps, uncond_embed, uncond_mask)
+                unconditional_noise = model(x_t, timesteps, uncond_embed)
             predicted_noise = unconditional_noise + self.guidance_scale * (
                 predicted_noise - unconditional_noise
             )
@@ -431,8 +431,6 @@ class Diffusion:
             f"cfg_probability={self.cfg_probability})"
         )
 
-
-import tqdm  # noqa: E402
 
 if __name__ == "__main__":
     # Quick test

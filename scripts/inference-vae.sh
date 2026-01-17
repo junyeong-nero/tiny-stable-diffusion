@@ -15,7 +15,7 @@
 
 set -e
 
-VAE_CHECKPOINT="${VAE_CHECKPOINT:-checkpoints/vae.pt}"
+VAE_CHECKPOINT="${VAE_CHECKPOINT:-checkpoints/vae_e40.pt}"
 
 # Check for --all flag
 if [ "$1" = "--all" ]; then
