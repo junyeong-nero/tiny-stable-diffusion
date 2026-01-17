@@ -83,11 +83,9 @@ def train_one_epoch(
             text_embeds = clip_encoder.encode(captions)
             text_embeds = text_embeds.to(device)
 
-        # Sample random timesteps
-        timesteps = torch.randint(
-            0,
-            diffusion.num_timesteps,
-            (latents.shape[0],),
+        # Sample timesteps using logit-normal distribution (SD3 style)
+        timesteps = diffusion.sample_timesteps_logit_normal(
+            batch_size=latents.shape[0],
             device=device,
         )
 
@@ -167,13 +165,12 @@ def generate_samples(
     original_scale = diffusion.guidance_scale
     diffusion.guidance_scale = guidance_scale
 
-    # Sample in latent space, decode to image
+    # Sample in latent space using Euler ODE solver, decode to image
     images = diffusion.sample(
         model=model,
         shape=(len(prompts), latent_channels, latent_size, latent_size),
         text_embeds=text_embeds,
         num_steps=50,
-        use_ddim=True,
         use_cfg=True,
         vae_decoder=vae_decoder,
     )
@@ -310,10 +307,9 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
         ema.to(device)
         print(f"EMA enabled with decay={config['ema_decay']}")
 
-    # Initialize diffusion
+    # Initialize Rectified Flow diffusion
     diffusion = Diffusion(
         num_timesteps=config["num_timesteps"],
-        beta_schedule=config["beta_schedule"],
         guidance_scale=config["guidance_scale"],
         cfg_probability=config.get("cfg_prob", config.get("initial_cfg_prob", 0.1)),
         uncond_embed=uncond_embed,

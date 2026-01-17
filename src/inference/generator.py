@@ -135,10 +135,9 @@ def generate(
     model = model.to(device)
     model.eval()
 
-    # Initialize diffusion
+    # Initialize Rectified Flow diffusion
     diffusion = Diffusion(
         num_timesteps=1000,
-        beta_schedule="cosine",
         guidance_scale=guidance_scale,
         uncond_embed=uncond_embed,
     )
@@ -152,13 +151,12 @@ def generate(
         text_embeds = clip_encoder.encode([prompt] * num_samples)
         text_embeds = text_embeds.to(device)
 
-        # Sample in latent space, decode to image
+        # Sample in latent space using Euler ODE solver, decode to image
         images = diffusion.sample(
             model=model,
             shape=(num_samples, in_channels, latent_size, latent_size),
             text_embeds=text_embeds,
             num_steps=num_steps,
-            use_ddim=True,
             use_cfg=True,
             vae_decoder=vae,
         )
@@ -266,7 +264,6 @@ def demo(
 
     diffusion = Diffusion(
         num_timesteps=1000,
-        beta_schedule="cosine",
         guidance_scale=7.5,
         uncond_embed=uncond_embed,
     )
@@ -290,7 +287,6 @@ def demo(
                 shape=(1, in_channels, latent_size, latent_size),
                 text_embeds=text_embeds,
                 num_steps=50,
-                use_ddim=True,
                 use_cfg=True,
                 vae_decoder=vae,
             )

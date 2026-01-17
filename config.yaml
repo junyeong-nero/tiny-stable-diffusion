@@ -97,10 +97,14 @@ diffusion_train:
     model_size: S # Options: S (30M), B (130M), L (300M), XL (675M)
     patch_size: 2
 
-    # Diffusion settings
+    # Diffusion settings (Rectified Flow)
     num_timesteps: 1000
-    beta_schedule: cosine
     guidance_scale: 7.5
+
+    # Timestep sampling (SD3 style logit-normal)
+    use_logit_normal_sampling: true
+    logit_mean: 0.0
+    logit_std: 1.0
 
     # EMA (Exponential Moving Average)
     use_ema: true
