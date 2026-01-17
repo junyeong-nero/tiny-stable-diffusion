@@ -33,23 +33,18 @@ def get_dataset(config: dict[str, Any]) -> Dataset:
         print(f"Loading local dataset from: {local_path}")
         return EmojiDataset(dataset_name=local_path, split="train")
 
-    elif data_source == "huggingface":
+    elif data_source in ("huggingface", "caption"):
+        # General HuggingFace image-caption dataset
         dataset_name = config.get("dataset_name", "junyeong-nero/emoji-32")
-        print(f"Loading Hugging Face dataset: {dataset_name}")
-        return EmojiDataset(dataset_name=dataset_name, split="train")
-
-    elif data_source == "caption":
-        # General image-caption dataset (Flickr8k, CC3M, Pokemon BLIP, etc.)
-        dataset_name = config.get("dataset_name", "ariG23498/flickr8k")
         image_field = config.get("image_field", "image")
         caption_field = config.get("caption_field", "caption")
-        target_size = config.get("image_size", 32)
+        target_size = config.get("image_size", 64)
         streaming = config.get("streaming", False)
         split = config.get("split", "train")
         url_timeout = config.get("url_timeout", 10)
         max_retries = config.get("max_retries", 3)
 
-        print(f"Loading caption dataset: {dataset_name}")
+        print(f"Loading HuggingFace dataset: {dataset_name}")
         return CaptionDataset(
             dataset_name=dataset_name,
             split=split,
