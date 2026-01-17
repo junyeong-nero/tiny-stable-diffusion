@@ -70,6 +70,7 @@ def train_one_epoch(
     model.train()
     vae_encoder.eval()  # VAE is always frozen
     epoch_loss = 0.0
+    step_count = 0
 
     progress_bar = tqdm(dataloader, desc="Training")
 
@@ -112,6 +113,7 @@ def train_one_epoch(
 
         loss_value = loss.item()
         epoch_loss += loss_value
+        step_count += 1
         progress_bar.set_postfix({"loss": loss_value})
 
         if use_wandb and WANDB_AVAILABLE:
@@ -126,7 +128,7 @@ def train_one_epoch(
 
         global_step += 1
 
-    return epoch_loss / len(dataloader), global_step
+    return epoch_loss / max(step_count, 1), global_step
 
 
 @torch.no_grad()
@@ -325,7 +327,13 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
     )
 
     # Learning rate scheduler
-    num_steps_per_epoch = len(dataloader)
+    # Handle streaming datasets that don't have length
+    try:
+        num_steps_per_epoch = len(dataloader)
+    except TypeError:
+        # IterableDataset doesn't have __len__, use config or default
+        num_steps_per_epoch = config.get("steps_per_epoch", 1000)
+        print(f"Streaming dataset: using {num_steps_per_epoch} steps per epoch")
     total_steps = config["epochs"] * num_steps_per_epoch
     warmup_steps = total_steps // 20
 
