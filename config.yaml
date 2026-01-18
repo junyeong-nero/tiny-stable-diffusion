@@ -8,12 +8,12 @@ training_stage: vae_train
 # Stage 1: VAE Training
 # =============================================================================
 vae_train:
-    # Data source: "streaming_caption" for large URL-based datasets
-    data_source: streaming_caption
+    # HuggingFace dataset settings
     dataset_name: hmu013/LAION-300k
     image_field: png # This dataset uses png field for images
     caption_field: json # Caption is nested in json: {"caption": "..."}
     split: train
+    stream: true # Use streaming mode for large datasets
 
     # Streaming settings for large datasets
     buffer_size: 5000 # Shuffle buffer size
@@ -61,12 +61,12 @@ vae_train:
 diffusion_train:
     # Model type: "dit" (Diffusion Transformer) or "mmdit" (Multi-Modal DiT from SD3)
     model_type: mmdit
-    # Data source: "huggingface" for HF datasets, "streaming_caption" for large URL-based datasets
-    data_source: huggingface
+    # HuggingFace dataset settings
     dataset_name: visual-layer/oxford-iiit-pet-vl-enriched # Oxford Pets dataset (cats & dogs)
     image_field: image
     caption_field: caption_enriched # Enriched captions with detailed descriptions
     split: train
+    stream: false # Set to true for large datasets
     # Alternative datasets:
     # - MSCOCO (general images, ~35k samples):
     #     dataset_name: clip-benchmark/wds_mscoco_captions

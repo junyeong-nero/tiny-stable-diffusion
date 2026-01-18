@@ -12,31 +12,22 @@ from src.data.dataset import CaptionDataset, StreamingCaptionDataset
 def get_dataset(config: dict[str, Any]) -> Dataset:
     """Create dataset based on config.
 
+    All datasets are loaded from HuggingFace. Use 'stream' option to control
+    whether to use streaming mode for large datasets.
+
     Args:
-        config: Configuration dictionary with data_source and related settings
+        config: Configuration dictionary with dataset settings
+            - dataset_name: HuggingFace dataset name
+            - stream: If True, use StreamingCaptionDataset (IterableDataset)
+                      If False, use CaptionDataset (map-style Dataset)
+            - Other settings: split, image_field, caption_field, etc.
 
     Returns:
         Dataset instance
-
-    Raises:
-        ValueError: If data_source is unknown
     """
-    data_source = config["data_source"]
+    stream = config.get("stream", False)
 
-    if data_source in ("huggingface", "caption"):
-        # HuggingFace image-caption dataset
-        return CaptionDataset(
-            dataset_name=config.get("dataset_name", "reach-vb/pokemon-blip-captions"),
-            split=config.get("split", "train"),
-            image_field=config.get("image_field", "image"),
-            caption_field=config.get("caption_field", "caption"),
-            target_size=config.get("image_size", 64),
-            streaming=config.get("streaming", False),
-            url_timeout=config.get("url_timeout", 10),
-            max_retries=config.get("max_retries", 3),
-        )
-
-    elif data_source == "streaming_caption":
+    if stream:
         # Streaming dataset for very large datasets (LAION, etc.)
         return StreamingCaptionDataset(
             dataset_name=config.get("dataset_name"),
@@ -49,9 +40,18 @@ def get_dataset(config: dict[str, Any]) -> Dataset:
             skip_failures=config.get("skip_failures", True),
             buffer_size=config.get("buffer_size", 1000),
         )
-
     else:
-        raise ValueError(f"Unknown data_source: {data_source}. Use 'huggingface' or 'streaming_caption'.")
+        # Standard HuggingFace dataset (fully loaded into memory)
+        return CaptionDataset(
+            dataset_name=config.get("dataset_name", "reach-vb/pokemon-blip-captions"),
+            split=config.get("split", "train"),
+            image_field=config.get("image_field", "image"),
+            caption_field=config.get("caption_field", "caption"),
+            target_size=config.get("image_size", 64),
+            streaming=False,
+            url_timeout=config.get("url_timeout", 10),
+            max_retries=config.get("max_retries", 3),
+        )
 
 
 def create_dataloader(

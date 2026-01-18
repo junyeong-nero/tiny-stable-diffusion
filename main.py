@@ -145,12 +145,7 @@ def _run_vae_training(args: argparse.Namespace) -> None:
 
     # Override with CLI args
     if args.dataset is not None:
-        if Path(args.dataset).exists():
-            config["data_source"] = "local"
-            config["local_dataset_path"] = args.dataset
-        else:
-            config["data_source"] = "caption"
-            config["dataset_name"] = args.dataset
+        config["dataset_name"] = args.dataset
 
     if args.epochs is not None:
         config["epochs"] = args.epochs
@@ -186,12 +181,7 @@ def _run_diffusion_training(args: argparse.Namespace) -> None:
 
     # Override with CLI args
     if args.dataset is not None:
-        if Path(args.dataset).exists():
-            config["data_source"] = "local"
-            config["local_dataset_path"] = args.dataset
-        else:
-            config["data_source"] = "caption"
-            config["dataset_name"] = args.dataset
+        config["dataset_name"] = args.dataset
 
     if args.vae_checkpoint is not None:
         config["vae_checkpoint"] = args.vae_checkpoint
