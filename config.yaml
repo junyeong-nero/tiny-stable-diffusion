@@ -105,7 +105,7 @@ diffusion_train:
 
   # ─── VAE Settings ──────────────────────────────────────────────────────────
   vae_checkpoint: checkpoints/vae.pt
-  scaling_factor: auto                # "auto" to compute from data, or float
+  scaling_factor: 0.4869              # Pre-computed from dataset (latent std: 2.0537)
 
   # ─── CFG (Classifier-Free Guidance) ────────────────────────────────────────
   # Dropout gradually increases from initial to final over warmup epochs
