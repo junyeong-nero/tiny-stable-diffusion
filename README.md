@@ -109,6 +109,57 @@ diffusion_train:
 
 ---
 
+## HuggingFace Hub
+
+Share your trained models and use pre-trained checkpoints from HuggingFace Hub.
+
+### Upload Checkpoints
+
+```bash
+# Set your HuggingFace token
+export HF_TOKEN=your_token_here
+
+# Upload VAE checkpoint
+python scripts/upload_to_hub.py --model-type vae --repo-id username/tiny-sd-vae
+
+# Upload Diffusion checkpoint
+python scripts/upload_to_hub.py --model-type diffusion --repo-id username/tiny-sd-diffusion
+
+# Upload both models to a single repository
+python scripts/upload_to_hub.py --model-type all --repo-id username/tiny-sd-models
+
+# Create a private repository
+python scripts/upload_to_hub.py --model-type all --repo-id username/tiny-sd-private --private
+```
+
+### Download Checkpoints
+
+```bash
+# Download VAE checkpoint
+python scripts/download_from_hub.py --repo-id username/tiny-sd-vae --model-type vae
+
+# Download Diffusion checkpoint
+python scripts/download_from_hub.py --repo-id username/tiny-sd-diffusion --model-type diffusion
+
+# Download both from a combined repository
+python scripts/download_from_hub.py --repo-id username/tiny-sd-models --model-type all
+
+# Download to custom directory
+python scripts/download_from_hub.py --repo-id username/tiny-sd-models --model-type all --output-dir ./models
+```
+
+### Use Downloaded Models
+
+```bash
+# Generate with downloaded checkpoints
+uv run main.py --generate \
+    --prompt "a cute cat" \
+    --vae-checkpoint checkpoints/vae.pt \
+    --checkpoint checkpoints/diffusion.pt
+```
+
+---
+
 ## CLI Commands
 
 ```bash
