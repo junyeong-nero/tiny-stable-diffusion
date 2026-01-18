@@ -4,9 +4,19 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange) ![License](https://img.shields.io/badge/License-MIT-green)
 
-## What is this?
+## Introduction
 
-A lightweight implementation of Stable Diffusion 3 for learning purposes. Train your own text-to-image model on a consumer GPU!
+A lightweight, educational implementation of **Stable Diffusion 3** built from scratch in PyTorch. This project is designed to help you understand how modern text-to-image diffusion models work by providing a minimal yet complete implementation.
+
+### Key Features
+
+- **64×64 Resolution**: Optimized for fast training and experimentation on consumer GPUs
+- **SD3 Architecture**: Implements the core components of Stable Diffusion 3
+  - AutoencoderKL (VAE) for latent space compression
+  - MMDiT (Multi-Modal Diffusion Transformer) for text-conditioned generation
+  - CLIP text encoder for prompt understanding
+- **Two-Stage Training**: Train VAE first, then diffusion model in latent space
+- **Beginner-Friendly**: Clean, readable code with minimal dependencies
 
 ### Example Generation
 
@@ -23,33 +33,47 @@ A lightweight implementation of Stable Diffusion 3 for learning purposes. Train 
 
 ---
 
-## Quick Start
+## How to Use
 
-### 1. Installation
+### 1. Environment Setup
 
-```bash
-# Using uv (recommended)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv sync
-
-# Or using pip
-pip install -e .
-```
-
-### 2. Training
+See `setup.sh` for detailed setup instructions.
 
 ```bash
-# Step 1: Train VAE (image compression)
-uv run main.py --train-vae
-
-# Step 2: Train Diffusion (text-to-image)
-uv run main.py --train-diffusion
-
-# Step 3: Generate images!
-uv run main.py --generate --prompt "a cute cat"
+# Quick setup
+bash setup.sh
 ```
 
-### 3. Web Demo
+### 2. Download Pretrained Weights
+
+Download the pretrained VAE and Diffusion model checkpoints:
+
+```bash
+# Download pretrained weights (coming soon)
+# Place checkpoints in the checkpoints/ directory
+```
+
+### 3. Inference
+
+#### VAE Reconstruction
+
+Test the VAE encoder-decoder by reconstructing images:
+
+```bash
+uv run main.py --reconstruct --image path/to/image.png
+```
+
+#### Diffusion (Text-to-Image Generation)
+
+Generate images from text prompts using the diffusion model:
+
+```bash
+uv run main.py --generate --prompt "a cute cat" --steps 50 --guidance 7.5
+```
+
+### 4. Web Demo
+
+Launch the interactive Streamlit web interface:
 
 ```bash
 uv run streamlit run src/demo/app.py
@@ -105,57 +129,6 @@ diffusion_train:
     model_size: B      # S, B, L, XL
     epochs: 200
     batch_size: 64
-```
-
----
-
-## HuggingFace Hub
-
-Share your trained models and use pre-trained checkpoints from HuggingFace Hub.
-
-### Upload Checkpoints
-
-```bash
-# Set your HuggingFace token
-export HF_TOKEN=your_token_here
-
-# Upload VAE checkpoint
-python scripts/upload_to_hub.py --model-type vae --repo-id username/tiny-sd-vae
-
-# Upload Diffusion checkpoint
-python scripts/upload_to_hub.py --model-type diffusion --repo-id username/tiny-sd-diffusion
-
-# Upload both models to a single repository
-python scripts/upload_to_hub.py --model-type all --repo-id username/tiny-sd-models
-
-# Create a private repository
-python scripts/upload_to_hub.py --model-type all --repo-id username/tiny-sd-private --private
-```
-
-### Download Checkpoints
-
-```bash
-# Download VAE checkpoint
-python scripts/download_from_hub.py --repo-id username/tiny-sd-vae --model-type vae
-
-# Download Diffusion checkpoint
-python scripts/download_from_hub.py --repo-id username/tiny-sd-diffusion --model-type diffusion
-
-# Download both from a combined repository
-python scripts/download_from_hub.py --repo-id username/tiny-sd-models --model-type all
-
-# Download to custom directory
-python scripts/download_from_hub.py --repo-id username/tiny-sd-models --model-type all --output-dir ./models
-```
-
-### Use Downloaded Models
-
-```bash
-# Generate with downloaded checkpoints
-uv run main.py --generate \
-    --prompt "a cute cat" \
-    --vae-checkpoint checkpoints/vae.pt \
-    --checkpoint checkpoints/diffusion.pt
 ```
 
 ---
