@@ -391,11 +391,13 @@ class AutoencoderKL(nn.Module):
         Returns:
             Computed scaling factor (1 / latent_std)
         """
+        from tqdm import tqdm
+
         device = next(self.parameters()).device
         all_latents = []
 
-        for i, batch in enumerate(dataloader):
-            if i >= num_batches:
+        for batch in tqdm(dataloader, total=num_batches, desc="Computing scaling factor"):
+            if len(all_latents) >= num_batches:
                 break
             images = batch["image"].to(device)
             mean, _ = self.encode(images)
