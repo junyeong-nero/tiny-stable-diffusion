@@ -1,162 +1,157 @@
-# tiny-stable-diffusion Configuration File
-# Stable Diffusion 3 style pipeline from scratch
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                      tiny-stable-diffusion Configuration                   ║
+# ║                   Stable Diffusion 3 Style Pipeline from Scratch           ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
-# Training stage: "vae_train", "diffusion_train"
+# Current training stage: "vae_train" or "diffusion_train"
 training_stage: vae_train
 
-# =============================================================================
-# Stage 1: VAE Training
-# =============================================================================
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │                         Stage 1: VAE Training                             │
+# │                    Image Compression to Latent Space                      │
+# └───────────────────────────────────────────────────────────────────────────┘
 vae_train:
-    # HuggingFace dataset settings
-    dataset_name: hmu013/LAION-300k
-    image_field: png # This dataset uses png field for images
-    caption_field: json # Caption is nested in json: {"caption": "..."}
-    split: train
-    stream: true # Use streaming mode for large datasets
+  # ─── Dataset ───────────────────────────────────────────────────────────────
+  dataset_name: hmu013/LAION-300k
+  image_field: png
+  caption_field: json                 # Caption nested in json: {"caption": "..."}
+  split: train
+  stream: true                        # Streaming mode for large datasets
 
-    # Streaming settings for large datasets
-    buffer_size: 5000 # Shuffle buffer size
-    skip_failures: true # Skip failed URL downloads
-    url_timeout: 10 # Timeout for URL requests (seconds)
-    max_retries: 3 # Max retries for failed requests
+  # ─── Streaming Options ─────────────────────────────────────────────────────
+  buffer_size: 5000                   # Shuffle buffer size
+  skip_failures: true                 # Skip failed URL downloads
+  url_timeout: 10                     # Timeout for URL requests (seconds)
+  max_retries: 3                      # Max retries for failed requests
 
-    # DataLoader settings
-    num_workers: 8 # Number of worker processes for data loading (0 = main process only)
-    prefetch_factor: 2 # Number of batches to prefetch per worker
+  # ─── DataLoader ────────────────────────────────────────────────────────────
+  num_workers: 8                      # Worker processes (0 = main process only)
+  prefetch_factor: 2                  # Batches to prefetch per worker
 
-    # Image settings
-    image_size: 64 # Input image size
+  # ─── Image Settings ────────────────────────────────────────────────────────
+  image_size: 64                      # Input image size
 
-    # VAE architecture
-    latent_channels: 16 # SD3 style (16 channels)
-    vae_ch: 64 # Base channel count (lightweight)
-    vae_ch_mult: [1, 2, 4, 4] # f8 compression: 64 -> 8
+  # ─── VAE Architecture ──────────────────────────────────────────────────────
+  latent_channels: 16                 # SD3 style (16 channels)
+  vae_ch: 64                          # Base channel count (lightweight)
+  vae_ch_mult: [1, 2, 4, 4]           # f8 compression: 64 -> 8
 
-    # Training hyperparameters
-    epochs: 100
-    batch_size: 256
-    learning_rate: 4.0e-4
+  # ─── Training Hyperparameters ──────────────────────────────────────────────
+  epochs: 100
+  batch_size: 256
+  learning_rate: 4.0e-4
 
-    # KL Annealing settings (Cyclical Annealing Schedule)
-    # Reference: "Cyclical Annealing Schedule: A Simple Approach to Mitigating KL Vanishing"
-    kl_weight: 0.000001 # Very low KL weight for SD-style VAE (reconstruction-focused)
-    kl_annealing: cyclical # Options: "none", "linear", "cyclical"
-    kl_n_cycles: 4 # Number of cycles for cyclical annealing
-    kl_cycle_ratio: 0.5 # Proportion of cycle spent increasing (rest at max)
+  # ─── KL Annealing ──────────────────────────────────────────────────────────
+  # Reference: "Cyclical Annealing Schedule: A Simple Approach to Mitigating KL Vanishing"
+  kl_weight: 0.000001                 # Low KL weight (reconstruction-focused)
+  kl_annealing: cyclical              # Options: "none", "linear", "cyclical"
+  kl_n_cycles: 4                      # Number of cycles for cyclical annealing
+  kl_cycle_ratio: 0.5                 # Proportion of cycle spent increasing
 
-    # Training settings
-    mixed_precision: false
-    device: auto
-    seed: 42
+  # ─── Training Settings ─────────────────────────────────────────────────────
+  mixed_precision: false
+  device: auto
+  seed: 42
 
-    # Checkpoint
-    checkpoint_path: checkpoints/vae.pt
-    checkpoint_interval: 10 # Save checkpoint every N epochs
-    resume: false # Set to true to resume training from checkpoint
+  # ─── Checkpoint ────────────────────────────────────────────────────────────
+  checkpoint_path: checkpoints/vae.pt
+  checkpoint_interval: 10             # Save every N epochs
+  resume: false                       # Resume from checkpoint
 
-# =============================================================================
-# Stage 2: Diffusion Training (on latent space)
-# =============================================================================
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │                       Stage 2: Diffusion Training                         │
+# │                    Text-to-Image Generation on Latent Space               │
+# └───────────────────────────────────────────────────────────────────────────┘
 diffusion_train:
-    # Model type: "dit" (Diffusion Transformer) or "mmdit" (Multi-Modal DiT from SD3)
-    model_type: mmdit
-    # HuggingFace dataset settings
+  # ─── Model Type ────────────────────────────────────────────────────────────
+  # "dit"   : Diffusion Transformer
+  # "mmdit" : Multi-Modal DiT (SD3 style)
+  model_type: mmdit
 
-    dataset_name: clip-benchmark/wds_mscoco_captions
-    image_field: jpg
-    caption_field: txt
+  # ─── Dataset ───────────────────────────────────────────────────────────────
+  dataset_name: clip-benchmark/wds_mscoco_captions
+  image_field: jpg
+  caption_field: txt
+  split: train
+  stream: true
 
-    # dataset_name: visual-layer/oxford-iiit-pet-vl-enriched # Oxford Pets dataset (cats & dogs)
-    # image_field: image
-    # caption_field: caption_enriched # Enriched captions with detailed descriptions
+  # Alternative: Oxford Pets dataset (cats & dogs)
+  # dataset_name: visual-layer/oxford-iiit-pet-vl-enriched
+  # image_field: image
+  # caption_field: caption_enriched
 
-    split: train
-    stream: false # Set to true for large datasets
+  # ─── DataLoader ────────────────────────────────────────────────────────────
+  num_workers: 4
+  prefetch_factor: 2
 
-    # Image and latent settings
-    image_size: 64 # Original image size
-    latent_size: 8 # Latent spatial size (64 / 8 = 8)
-    in_channels: 16 # Latent channels (matches VAE)
+  # ─── Image & Latent Settings ───────────────────────────────────────────────
+  image_size: 64                      # Original image size
+  latent_size: 8                      # Latent spatial size (64 / 8 = 8)
+  in_channels: 16                     # Latent channels (matches VAE)
 
-    # Training hyperparameters
-    epochs: 200
-    batch_size: 256 # Reduced from 256 for small dataset (~7.4k images)
-    learning_rate: 3.0e-4 # Increased for faster convergence
+  # ─── Model Architecture ────────────────────────────────────────────────────
+  # Model sizes (approximate params):
+  #   DiT:   S=40M,  B=159M, L=559M, XL=824M
+  #   MMDiT: S=87M,  B=187M, L=559M, XL=780M
+  model_size: B
+  patch_size: 2                       # Patch size for image tokenization
+  qk_rmsnorm: true                    # MMDiT: QK RMSNorm
+  register_tokens: 0                  # MMDiT: Register tokens
 
-    # CFG (Classifier-Free Guidance) dropout probability
-    # Gradually increases from initial to final over warmup epochs
-    initial_cfg_prob: 0.0 # Start with no unconditional dropout
-    final_cfg_prob: 0.1 # 10% unconditional dropout after warmup
-    cfg_warmup_epochs: 10 # Number of epochs to reach final_cfg_prob
+  # ─── Training Hyperparameters ──────────────────────────────────────────────
+  epochs: 200
+  batch_size: 256
+  learning_rate: 3.0e-4
 
-    # VAE checkpoint (required)
-    vae_checkpoint: checkpoints/vae.pt
+  # ─── VAE Settings ──────────────────────────────────────────────────────────
+  vae_checkpoint: checkpoints/vae.pt
+  scaling_factor: auto                # "auto" to compute from data, or float
 
-    # VAE scaling factor for latent normalization
-    # SD3 uses ~1.5305, set to 1.0 to disable, or "auto" to compute from data
-    # Scales latent space to have std ≈ 1 for stable diffusion training
-    scaling_factor: auto
+  # ─── CFG (Classifier-Free Guidance) ────────────────────────────────────────
+  # Dropout gradually increases from initial to final over warmup epochs
+  initial_cfg_prob: 0.0               # Start with no unconditional dropout
+  final_cfg_prob: 0.1                 # 10% unconditional dropout after warmup
+  cfg_warmup_epochs: 10               # Epochs to reach final_cfg_prob
 
-    # Checkpoint
-    checkpoint_path: checkpoints/diffusion.pt
-    checkpoint_dir: checkpoints
-    checkpoint_interval: 10 # Save checkpoint every N epochs
-    resume: false # Set to true to resume training from checkpoint
+  # ─── Diffusion Settings (Rectified Flow) ───────────────────────────────────
+  num_timesteps: 1000
+  guidance_scale: 7.5
 
-    # DiT/MMDiT model configuration
-    # Model sizes (approximate params):
-    #   DiT:   S=40M, B=159M, L=559M, XL=824M
-    #   MMDiT: S=87M, B=187M, L=559M, XL=780M
-    model_size: B
-    patch_size: 2 # Patch size for image tokenization
+  # ─── Timestep Sampling (SD3 Logit-Normal) ──────────────────────────────────
+  use_logit_normal_sampling: true
+  logit_mean: 0.0
+  logit_std: 1.0
 
-    # Diffusion settings (Rectified Flow)
-    num_timesteps: 1000
-    guidance_scale: 7.5
+  # ─── EMA (Exponential Moving Average) ──────────────────────────────────────
+  use_ema: true
+  ema_decay: 0.9999
 
-    # Timestep sampling (SD3 style logit-normal)
-    use_logit_normal_sampling: true
-    logit_mean: 0.0
-    logit_std: 1.0
+  # ─── Training Settings ─────────────────────────────────────────────────────
+  mixed_precision: false
+  device: auto
+  seed: 42
 
-    # EMA (Exponential Moving Average)
-    use_ema: true
-    ema_decay: 0.9999
+  # ─── Checkpoint ────────────────────────────────────────────────────────────
+  checkpoint_path: checkpoints/diffusion.pt
+  checkpoint_dir: checkpoints
+  checkpoint_interval: 10             # Save every N epochs
+  resume: false                       # Resume from checkpoint
 
-    # Training settings
-    mixed_precision: false
-    device: auto
-    seed: 42
+  # ─── Validation ────────────────────────────────────────────────────────────
+  validation_prompts:
+    - a photo of a fluffy Persian cat
+    - a golden retriever sitting on grass
+    - a black and white Border Collie
+    - a cute tabby kitten playing
+    - a Siamese cat with blue eyes
+  validation_interval: 10             # Generate samples every N epochs
+  sample_dir: samples                 # Directory for generated samples
 
-    # DataLoader settings
-    num_workers: 4 # Number of worker processes for data loading (0 = main process only)
-    prefetch_factor: 2 # Number of batches to prefetch per worker
-
-    # Validation - prompts aligned with Oxford Pets dataset (cats & dogs)
-    validation_prompts:
-        - a photo of a fluffy Persian cat
-        - a golden retriever sitting on grass
-        - a black and white Border Collie
-        - a cute tabby kitten playing
-        - a Siamese cat with blue eyes
-    validation_interval: 10 # Generate samples every N epochs
-    sample_dir: samples # Directory to save generated samples
-
-    # MMDiT-specific settings
-    qk_rmsnorm: true
-    register_tokens: 0
-
-# =============================================================================
-# HuggingFace Hub Settings
-# =============================================================================
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │                         HuggingFace Hub Settings                          │
+# └───────────────────────────────────────────────────────────────────────────┘
 hub:
-    # Push to HuggingFace Hub after training
-    push_to_hub: false
-    # Repository ID (e.g., "username/tiny-sd-vae")
-    # If not set, will be prompted during upload
-    model_id: null
-    # Create private repository
-    private: false
-    # HuggingFace token (recommended to use HF_TOKEN env var instead)
-    # token: null
+  push_to_hub: false                  # Push to HF Hub after training
+  model_id: null                      # Repository ID (e.g., "username/tiny-sd-vae")
+  private: false                      # Create private repository
+  # token: null                       # Use HF_TOKEN env var instead
