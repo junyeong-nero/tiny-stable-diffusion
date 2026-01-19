@@ -1,9 +1,9 @@
 # Training Quick Start Guide
 
-> tiny-stable-diffusion 훈련을 위한 빠른 시작 가이드입니다.
-> 더 자세한 내용은 [training-pipeline.md](./training-pipeline.md)를 참조하세요.
+> A quick start guide for training tiny-stable-diffusion.
+> For more details, see [training-pipeline.md](./training-pipeline.md).
 
-## 목차
+## Table of Contents
 
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
@@ -15,52 +15,52 @@
 
 ## Quick Start
 
-### 1. 환경 설정
+### 1. Environment Setup
 
 ```bash
-# uv 설치 (권장)
+# Install uv (recommended)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 의존성 설치
+# Install dependencies
 uv sync
 
-# 또는 pip 사용
+# Or use pip
 pip install -e .
 ```
 
-### 2. Stage 1: VAE 훈련
+### 2. Stage 1: VAE Training
 
 ```bash
-# 기본 VAE 훈련
+# Basic VAE training
 uv run main.py --train-vae --epochs 100 --batch-size 32
 
-# Wandb 로깅 활성화
+# With Wandb logging
 uv run main.py --train-vae --epochs 100 --batch-size 32 --wandb
 
-# 커스텀 데이터셋 사용
+# With custom dataset
 uv run main.py --train-vae --epochs 100 --dataset reach-vb/pokemon-blip-captions
 ```
 
-### 3. Stage 2: Diffusion 훈련
+### 3. Stage 2: Diffusion Training
 
 ```bash
-# 기본 Diffusion 훈련 (VAE 필요)
+# Basic Diffusion training (requires VAE)
 uv run main.py --train-diffusion --epochs 200 --batch-size 32
 
-# VAE 체크포인트 지정
+# Specify VAE checkpoint
 uv run main.py --train-diffusion --vae-checkpoint checkpoints/vae.pt --epochs 200
 ```
 
-### 4. 이미지 생성
+### 4. Image Generation
 
 ```bash
-# 단일 이미지 생성
+# Generate single image
 uv run main.py --generate --prompt "a cute cat"
 
-# 여러 이미지 생성
+# Generate multiple images
 uv run main.py --generate --prompt "a robot,a sunset,a mountain" --num-samples 4
 
-# 설정 옵션
+# With options
 uv run main.py --generate \
     --prompt "a beautiful landscape" \
     --steps 50 \
@@ -68,13 +68,13 @@ uv run main.py --generate \
     --seed 42
 ```
 
-### 5. HuggingFace Hub에 업로드
+### 5. Upload to HuggingFace Hub
 
 ```bash
-# VAE 훈련 후 업로드
+# Upload after VAE training
 uv run main.py --train-vae --push-to-hub --hub-model-id username/my-vae
 
-# Diffusion 훈련 후 업로드
+# Upload after Diffusion training
 uv run main.py --train-diffusion --push-to-hub --hub-model-id username/my-diffusion
 ```
 
@@ -82,13 +82,13 @@ uv run main.py --train-diffusion --push-to-hub --hub-model-id username/my-diffus
 
 ## Configuration
 
-### config.yaml 구조
+### config.yaml Structure
 
 ```yaml
-# 현재 훈련 단계
-training_stage: vae_train  # 또는 diffusion_train
+# Current training stage
+training_stage: vae_train  # or diffusion_train
 
-# VAE 훈련 설정
+# VAE training settings
 vae_train:
     data_source: streaming_caption
     dataset_name: hmu013/LAION-300k
@@ -100,9 +100,9 @@ vae_train:
     kl_weight: 1.0e-6
     checkpoint_path: checkpoints/vae.pt
 
-# Diffusion 훈련 설정
+# Diffusion training settings
 diffusion_train:
-    model_type: mmdit  # dit 또는 mmdit
+    model_type: mmdit  # dit or mmdit
     model_size: S      # S, B, L, XL
     epochs: 200
     batch_size: 32
@@ -114,12 +114,12 @@ diffusion_train:
     checkpoint_path: checkpoints/diffusion.pt
 ```
 
-### CLI 우선순위
+### CLI Priority
 
-CLI 인자가 config.yaml 값을 덮어씁니다:
+CLI arguments override config.yaml values:
 
 ```bash
-# config.yaml에서 epochs=100이어도 CLI가 우선
+# Even if epochs=100 in config.yaml, CLI takes priority
 uv run main.py --train-vae --epochs 50
 ```
 
@@ -127,27 +127,27 @@ uv run main.py --train-vae --epochs 50
 
 ## Hyperparameters
 
-### VAE 훈련
+### VAE Training
 
-| 파라미터 | 기본값 | 권장 범위 | 설명 |
-|----------|--------|-----------|------|
-| `epochs` | 100 | 50-200 | 훈련 에폭 수 |
-| `batch_size` | 128 | 32-256 | 배치 크기 |
-| `learning_rate` | 4e-4 | 1e-4 ~ 1e-3 | 학습률 |
-| `kl_weight` | 1e-6 | 1e-7 ~ 1e-5 | KL 손실 가중치 |
+| Parameter | Default | Recommended Range | Description |
+|-----------|---------|-------------------|-------------|
+| `epochs` | 100 | 50-200 | Number of training epochs |
+| `batch_size` | 128 | 32-256 | Batch size |
+| `learning_rate` | 4e-4 | 1e-4 ~ 1e-3 | Learning rate |
+| `kl_weight` | 1e-6 | 1e-7 ~ 1e-5 | KL loss weight |
 
-### Diffusion 훈련
+### Diffusion Training
 
-| 파라미터 | 기본값 | 권장 범위 | 설명 |
-|----------|--------|-----------|------|
-| `epochs` | 200 | 100-500 | 훈련 에폭 수 |
-| `batch_size` | 32 | 16-64 | 배치 크기 |
-| `learning_rate` | 1e-4 | 5e-5 ~ 3e-4 | 학습률 |
-| `guidance_scale` | 7.5 | 3.0-15.0 | CFG 스케일 |
-| `cfg_probability` | 0.1 | 0.05-0.2 | CFG 드롭아웃 확률 |
-| `ema_decay` | 0.9999 | 0.999-0.9999 | EMA 감쇠율 |
+| Parameter | Default | Recommended Range | Description |
+|-----------|---------|-------------------|-------------|
+| `epochs` | 200 | 100-500 | Number of training epochs |
+| `batch_size` | 32 | 16-64 | Batch size |
+| `learning_rate` | 1e-4 | 5e-5 ~ 3e-4 | Learning rate |
+| `guidance_scale` | 7.5 | 3.0-15.0 | CFG scale |
+| `cfg_probability` | 0.1 | 0.05-0.2 | CFG dropout probability |
+| `ema_decay` | 0.9999 | 0.999-0.9999 | EMA decay rate |
 
-### 모델 크기
+### Model Sizes
 
 | Size | Layers | Hidden | Heads | Params | VRAM |
 |------|--------|--------|-------|--------|------|
@@ -160,35 +160,35 @@ uv run main.py --train-vae --epochs 50
 
 ## Hardware Requirements
 
-### GPU 메모리
+### GPU Memory
 
-| 단계 | Model Size | Batch Size | VRAM |
-|------|------------|------------|------|
+| Stage | Model Size | Batch Size | VRAM |
+|-------|------------|------------|------|
 | VAE | - | 32 | ~4GB |
 | VAE | - | 128 | ~8GB |
 | Diffusion | S | 32 | ~6GB |
 | Diffusion | B | 32 | ~12GB |
 | Diffusion | L | 16 | ~20GB |
 
-### 권장 사양
+### Recommended Specifications
 
-**최소:**
-- GPU: RTX 3060 12GB 이상
+**Minimum:**
+- GPU: RTX 3060 12GB or higher
 - RAM: 16GB
 - Storage: 20GB SSD
 
-**권장:**
-- GPU: RTX 3090 24GB 이상
+**Recommended:**
+- GPU: RTX 3090 24GB or higher
 - RAM: 32GB
 - Storage: 50GB SSD
 
 ### Apple Silicon (MPS)
 
 ```bash
-# MPS 자동 감지
+# MPS auto-detection
 uv run main.py --train-vae --batch-size 32
 
-# 또는 config.yaml에서 설정
+# Or set in config.yaml
 # device: mps
 ```
 
@@ -199,43 +199,43 @@ uv run main.py --train-vae --batch-size 32
 ### CUDA Out of Memory
 
 ```bash
-# 해결책 1: 배치 크기 줄이기
+# Solution 1: Reduce batch size
 --batch-size 16
 
-# 해결책 2: Mixed precision 활성화
-# config.yaml에서
+# Solution 2: Enable mixed precision
+# In config.yaml
 mixed_precision: true
 
-# 해결책 3: 모델 크기 줄이기
+# Solution 3: Use smaller model
 model_size: S
 ```
 
-### Loss가 감소하지 않음
+### Loss Not Decreasing
 
-1. **학습률 확인**: 너무 높으면 불안정, 너무 낮으면 느림
-2. **KL weight 확인**: VAE에서 1e-6 권장
-3. **데이터셋 확인**: 이미지가 제대로 로딩되는지
+1. **Check learning rate**: Too high = unstable, too low = slow
+2. **Check KL weight**: 1e-6 recommended for VAE
+3. **Check dataset**: Ensure images are loading correctly
 
-### NaN Loss 발생
+### NaN Loss
 
 ```bash
-# 해결책: 학습률 낮추기
+# Solution: Lower learning rate
 --learning-rate 5e-5
 
-# 또는 gradient clipping 추가 (코드 수정 필요)
+# Or add gradient clipping (requires code modification)
 ```
 
-### 생성 품질이 낮음
+### Poor Generation Quality
 
-1. **더 많은 에폭** 훈련
-2. **Guidance scale** 조정: 7.5-10.0
-3. **Steps** 늘리기: 50-100
-4. **EMA weights** 사용 확인
+1. Train for **more epochs**
+2. Adjust **guidance scale**: 7.5-10.0
+3. Increase **steps**: 50-100
+4. Verify **EMA weights** are being used
 
-### CLIP 설치 오류
+### CLIP Installation Error
 
 ```bash
-# OpenAI CLIP 설치
+# Install OpenAI CLIP
 pip install git+https://github.com/openai/CLIP.git
 ```
 
@@ -243,59 +243,59 @@ pip install git+https://github.com/openai/CLIP.git
 
 ## Best Practices
 
-### 1. 점진적 훈련
+### 1. Progressive Training
 
 ```bash
-# Step 1: 작은 데이터셋으로 테스트
+# Step 1: Test with small dataset
 uv run main.py --train-vae --epochs 10 --dataset reach-vb/pokemon-blip-captions
 
-# Step 2: 큰 데이터셋으로 본 훈련
+# Step 2: Full training with large dataset
 uv run main.py --train-vae --epochs 100 --dataset hmu013/LAION-300k
 ```
 
-### 2. 체크포인트 관리
+### 2. Checkpoint Management
 
 ```bash
-# 훈련 중 자동 저장: best loss 기준
-# 위치: checkpoints/vae.pt, checkpoints/diffusion.pt
+# Auto-save during training: based on best loss
+# Location: checkpoints/vae.pt, checkpoints/diffusion.pt
 
-# HuggingFace Hub에 백업
+# Backup to HuggingFace Hub
 --push-to-hub --hub-model-id username/model-name
 ```
 
-### 3. 모니터링
+### 3. Monitoring
 
 ```bash
-# Wandb로 훈련 모니터링
+# Monitor training with Wandb
 --wandb --wandb-project tiny-stable-diffusion
 
-# 샘플 확인
+# Check samples
 # samples/vae_epoch_N/: VAE reconstruction
 # samples/epoch_N/: Diffusion generation
 ```
 
-### 4. 재현성
+### 4. Reproducibility
 
 ```bash
-# 시드 고정
-# config.yaml에서
+# Fix seed
+# In config.yaml
 seed: 42
 
-# 또는 generation 시
+# Or during generation
 --seed 42
 ```
 
 ---
 
-## 추가 문서
+## Additional Documentation
 
-- [Architecture Deep Dive](./architecture.md) - 모델 아키텍처 상세
-- [Training Pipeline Deep Dive](./training-pipeline.md) - 훈련 과정 상세
-- [Inference Deep Dive](./inference.md) - 이미지 생성 상세
+- [Architecture Deep Dive](./architecture.md) - Model architecture details
+- [Training Pipeline Deep Dive](./training-pipeline.md) - Training process details
+- [Inference Deep Dive](./inference.md) - Image generation details
 
 ---
 
-## 참고 자료
+## References
 
 - [Stable Diffusion 3 Paper](https://arxiv.org/abs/2403.03206)
 - [DiT Paper](https://arxiv.org/abs/2212.09748)

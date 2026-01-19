@@ -1,8 +1,8 @@
 # Inference & Generation Deep Dive
 
-> 이 문서는 tiny-stable-diffusion의 이미지 생성 과정을 상세하게 설명합니다.
+> This document provides a detailed explanation of the image generation process in tiny-stable-diffusion.
 
-## 목차
+## Table of Contents
 
 1. [Generation Pipeline Overview](#generation-pipeline-overview)
 2. [Sampling Algorithms](#sampling-algorithms)
@@ -15,447 +15,296 @@
 
 ## Generation Pipeline Overview
 
-> 파일 위치: `src/inference/generator.py`
+> File location: `src/inference/generator.py`
 
-### 전체 생성 과정
+### Complete Generation Process
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                        Image Generation Pipeline                                 │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                 │
-│  Input: "a cute cat sitting on a couch"                                        │
-│                                                                                 │
-│  ┌───────────────────────────────────────────────────────────────────────────┐ │
-│  │ Step 1: Text Encoding (CLIP)                                              │ │
-│  │                                                                            │ │
-│  │ "a cute cat..." ──▶ Tokenize ──▶ CLIP Transformer ──▶ text_embed (1, 512)│ │
-│  │                                                                            │ │
-│  │ "empty string"  ──▶ Tokenize ──▶ CLIP Transformer ──▶ uncond_embed (1,512)│ │
-│  └───────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                 │
-│  ┌───────────────────────────────────────────────────────────────────────────┐ │
-│  │ Step 2: Initialize Random Noise                                           │ │
-│  │                                                                            │ │
-│  │ z_T = randn(1, 16, 8, 8)  # Pure Gaussian noise in latent space          │ │
-│  │                                                                            │ │
-│  │ if seed provided:                                                          │ │
-│  │     torch.manual_seed(seed)  # Reproducible generation                    │ │
-│  └───────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                 │
-│  ┌───────────────────────────────────────────────────────────────────────────┐ │
-│  │ Step 3: Iterative Denoising (DDIM 50 steps)                               │ │
-│  │                                                                            │ │
-│  │ for t in [999, 979, 959, ..., 19, 0]:                                     │ │
-│  │     ┌─────────────────────────────────────────────────────────────────┐   │ │
-│  │     │ # Conditional prediction                                         │   │ │
-│  │     │ noise_cond = DiT(z_t, t, text_embed)                            │   │ │
-│  │     │                                                                  │   │ │
-│  │     │ # Unconditional prediction                                       │   │ │
-│  │     │ noise_uncond = DiT(z_t, t, uncond_embed)                        │   │ │
-│  │     │                                                                  │   │ │
-│  │     │ # Classifier-Free Guidance                                       │   │ │
-│  │     │ noise_pred = uncond + scale × (cond - uncond)                   │   │ │
-│  │     │                                                                  │   │ │
-│  │     │ # DDIM step                                                      │   │ │
-│  │     │ z_{t-1} = ddim_step(z_t, noise_pred, t)                         │   │ │
-│  │     └─────────────────────────────────────────────────────────────────┘   │ │
-│  │                                                                            │ │
-│  │ Output: z_0 (1, 16, 8, 8) - Clean latent                                  │ │
-│  └───────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                 │
-│  ┌───────────────────────────────────────────────────────────────────────────┐ │
-│  │ Step 4: VAE Decoding                                                       │ │
-│  │                                                                            │ │
-│  │ z_0 ──▶ post_quant_conv ──▶ Decoder ──▶ image (1, 3, 64, 64)             │ │
-│  │                                                                            │ │
-│  │ image = (image + 1) / 2  # [-1, 1] → [0, 1]                               │ │
-│  │ image = clamp(image, 0, 1)                                                │ │
-│  └───────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                 │
-│  Output: 64×64 RGB image                                                       │
-│                                                                                 │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+**Input**: A text prompt such as "a cute cat sitting on a couch"
+
+**Step 1: Text Encoding (CLIP)**
+- The prompt is tokenized and passed through the CLIP Transformer to produce `text_embed` with shape (1, 512)
+- An empty string is also encoded to produce `uncond_embed` with shape (1, 512) for classifier-free guidance
+
+**Step 2: Initialize Random Noise**
+- Create pure Gaussian noise in latent space: `z_T = randn(1, 16, 8, 8)`
+- If a seed is provided, `torch.manual_seed(seed)` is called for reproducible generation
+
+**Step 3: Iterative Denoising (DDIM 50 steps)**
+
+For each timestep t in [999, 979, 959, ..., 19, 0]:
+1. Compute conditional prediction: `noise_cond = DiT(z_t, t, text_embed)`
+2. Compute unconditional prediction: `noise_uncond = DiT(z_t, t, uncond_embed)`
+3. Apply Classifier-Free Guidance: `noise_pred = uncond + scale × (cond - uncond)`
+4. Perform DDIM step: `z_{t-1} = ddim_step(z_t, noise_pred, t)`
+
+Output: `z_0` (1, 16, 8, 8) - Clean latent
+
+**Step 4: VAE Decoding**
+- Pass the clean latent through post_quant_conv and Decoder to produce image (1, 3, 64, 64)
+- Normalize from [-1, 1] to [0, 1]: `image = (image + 1) / 2`
+- Clamp values: `image = clamp(image, 0, 1)`
+
+**Output**: 64×64 RGB image
 
 ---
 
 ## Sampling Algorithms
 
-### DDPM vs DDIM 비교
+### DDPM vs DDIM Comparison
 
-| 특성 | DDPM | DDIM |
-|------|------|------|
-| 샘플링 방식 | 확률적 (Stochastic) | 결정론적 (Deterministic) |
-| 필요 스텝 | 1000 | **50** (또는 더 적게) |
-| 속도 | 느림 | **빠름** |
-| 재현성 | 매 생성마다 다름 | **같은 시드 = 같은 결과** |
-| 품질 | 좋음 | 좋음 (약간 다를 수 있음) |
+| Feature | DDPM | DDIM |
+|---------|------|------|
+| Sampling method | Stochastic | Deterministic |
+| Required steps | 1000 | **50** (or fewer) |
+| Speed | Slow | **Fast** |
+| Reproducibility | Different each time | **Same seed = same result** |
+| Quality | Good | Good (may differ slightly) |
 
 ### DDPM Sampling
 
 ```python
 def p_sample(self, model, x_t, t, text_embeds, use_cfg=True):
     """
-    DDPM Reverse Process: 확률적 역방향 샘플링
-    
-    수학적 배경:
+    DDPM Reverse Process: Stochastic reverse sampling
+
+    Mathematical background:
     p(x_{t-1} | x_t) = N(x_{t-1}; μ_θ(x_t, t), σ_t²I)
-    
-    과정:
-    1. 노이즈 예측: ε_θ = model(x_t, t, text)
-    2. x_0 예측: x̂_0 = (x_t - √(1-ᾱ_t)ε_θ) / √(ᾱ_t)
-    3. 사후분포 평균: μ = coef1 × x̂_0 + coef2 × x_t
-    4. 노이즈 추가: x_{t-1} = μ + σ_t × z, z ~ N(0, I)
+
+    Process:
+    1. Predict noise: ε_θ = model(x_t, t, text)
+    2. Predict x_0: x̂_0 = (x_t - √(1-ᾱ_t)ε_θ) / √(ᾱ_t)
+    3. Compute posterior mean: μ = coef1 × x̂_0 + coef2 × x_t
+    4. Add noise: x_{t-1} = μ + σ_t × z, z ~ N(0, I)
     """
 ```
 
-```
-DDPM 샘플링 시각화:
-
-x_T (noise) ──▶ x_{T-1} ──▶ x_{T-2} ──▶ ... ──▶ x_1 ──▶ x_0 (clean)
-    │              │           │                 │         │
-    ▼              ▼           ▼                 ▼         ▼
-  + noise        + noise    + noise           + noise   (no noise)
-
-특징:
-- 매 스텝에서 랜덤 노이즈 추가 (확률적)
-- 같은 시작점에서도 다른 결과
-- 다양성은 좋지만 재현 어려움
-```
+**DDPM Sampling Characteristics**:
+- Random noise added at each step (stochastic)
+- Different results from same starting point
+- Good diversity but difficult to reproduce
 
 ### DDIM Sampling
 
 ```python
 def ddim_sample(self, model, x_t, t, text_embeds, eta=0.0, use_cfg=True):
     """
-    DDIM Reverse Process: 결정론적 역방향 샘플링
-    
-    핵심 차이: eta 파라미터로 확률성 제어
-    - eta = 0: 완전 결정론적 (권장)
-    - eta = 1: DDPM과 동일
-    
-    과정:
-    1. 노이즈 예측: ε_θ = model(x_t, t, text)
-    2. x_0 예측: x̂_0 = (x_t - √(1-α_t)ε_θ) / √(α_t)
-    3. σ 계산: σ_t = η × √((1-α_{t-1})/(1-α_t)) × √(1-α_t/α_{t-1})
-    4. 방향 계산: dir = √(1 - α_{t-1} - σ²) × ε_θ
-    5. 샘플링: x_{t-1} = √(α_{t-1}) × x̂_0 + dir + σ × z
+    DDIM Reverse Process: Deterministic reverse sampling
+
+    Key difference: eta parameter controls stochasticity
+    - eta = 0: Fully deterministic (recommended)
+    - eta = 1: Same as DDPM
+
+    Process:
+    1. Predict noise: ε_θ = model(x_t, t, text)
+    2. Predict x_0: x̂_0 = (x_t - √(1-α_t)ε_θ) / √(α_t)
+    3. Compute σ: σ_t = η × √((1-α_{t-1})/(1-α_t)) × √(1-α_t/α_{t-1})
+    4. Compute direction: dir = √(1 - α_{t-1} - σ²) × ε_θ
+    5. Sample: x_{t-1} = √(α_{t-1}) × x̂_0 + dir + σ × z
     """
 ```
 
-```
-DDIM 샘플링 시각화 (eta=0):
+**DDIM Sampling Characteristics** (eta=0):
+- No noise added when eta=0 (deterministic)
+- Compresses 1000 steps to 50 steps
+- Same seed always produces the same result
+- Timestep interval: 1000/50 = 20 timesteps skipped
+- Timesteps: [999, 979, 959, ..., 39, 19, 0]
 
-x_T (noise) ──▶ x_{t_49} ──▶ x_{t_48} ──▶ ... ──▶ x_{t_1} ──▶ x_0 (clean)
-    │              │           │                    │           │
-    ▼              ▼           ▼                    ▼           ▼
-  (skip)       (skip)      (skip)              (skip)      (no skip)
-
-스텝 간격: 1000/50 = 20 timesteps씩 건너뜀
-timesteps: [999, 979, 959, ..., 39, 19, 0]
-
-특징:
-- eta=0이면 노이즈 추가 없음 (결정론적)
-- 1000스텝을 50스텝으로 압축
-- 같은 시드면 항상 같은 결과
-```
-
-### Timestep 선택
+### Timestep Selection
 
 ```python
-# DDIM timestep 계산
+# DDIM timestep calculation
 if use_ddim:
     step_indices = torch.linspace(0, num_timesteps - 1, num_steps + 1)
     timesteps = torch.flip(step_indices.long(), dims=[0])[:-1]
-    # 예: num_steps=50일 때
-    # timesteps = [999, 979, 959, ..., 39, 19, 0] (50개)
+    # Example: when num_steps=50
+    # timesteps = [999, 979, 959, ..., 39, 19, 0] (50 values)
 else:
     timesteps = torch.arange(num_timesteps - 1, -1, -1)
-    # timesteps = [999, 998, 997, ..., 2, 1, 0] (1000개)
+    # timesteps = [999, 998, 997, ..., 2, 1, 0] (1000 values)
 ```
 
 ---
 
 ## Classifier-Free Guidance
 
-### CFG 개념
+### CFG Concept
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    Classifier-Free Guidance (CFG)                               │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                 │
-│  목적: text 조건을 더 강하게 반영                                              │
-│                                                                                 │
-│  방법:                                                                          │
-│  1. Conditional 예측: ε_cond = model(x_t, t, text_embed)                       │
-│  2. Unconditional 예측: ε_uncond = model(x_t, t, uncond_embed)                 │
-│  3. Guidance 적용: ε̃ = ε_uncond + s × (ε_cond - ε_uncond)                      │
-│                                                                                 │
-│  수학적 해석:                                                                   │
-│  ε̃ = (1 - s) × ε_uncond + s × ε_cond                                          │
-│                                                                                 │
-│  s = 1.0: conditional과 동일 (guidance 없음)                                   │
-│  s > 1.0: conditional 방향으로 더 강하게 이동                                  │
-│  s = 7.5: 권장값 (SD3 기본값)                                                  │
-│                                                                                 │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+**Purpose**: Strengthen the influence of text conditions
 
-### Guidance Scale 효과
+**Method**:
+1. Conditional prediction: `ε_cond = model(x_t, t, text_embed)`
+2. Unconditional prediction: `ε_uncond = model(x_t, t, uncond_embed)`
+3. Apply guidance: `ε̃ = ε_uncond + s × (ε_cond - ε_uncond)`
 
-```
-Guidance Scale (s) 효과:
+**Mathematical interpretation**: `ε̃ = (1 - s) × ε_uncond + s × ε_cond`
 
-s = 1.0:
-┌─────────────────────────────────────────────────────────────────┐
-│ - 조건부 생성만 사용                                            │
-│ - text 반영 약함                                                │
-│ - 다양성 높음                                                   │
-│ - 품질 낮을 수 있음                                             │
-└─────────────────────────────────────────────────────────────────┘
+**Guidance scale values**:
+- s = 1.0: Same as conditional only (no guidance)
+- s > 1.0: Stronger movement toward conditional direction
+- s = 7.5: Recommended value (SD3 default)
 
-s = 3.0:
-┌─────────────────────────────────────────────────────────────────┐
-│ - 약한 guidance                                                 │
-│ - text 어느정도 반영                                            │
-│ - 다양성 유지                                                   │
-└─────────────────────────────────────────────────────────────────┘
+### Guidance Scale Effects
 
-s = 7.5 (권장):
-┌─────────────────────────────────────────────────────────────────┐
-│ - 적절한 balance                                                │
-│ - text 잘 반영                                                  │
-│ - 좋은 품질                                                     │
-│ - SD3 기본값                                                    │
-└─────────────────────────────────────────────────────────────────┘
+| Scale | Effect |
+|-------|--------|
+| s = 1.0 | Uses conditional generation only; weak text reflection; high diversity; may have lower quality |
+| s = 3.0 | Weak guidance; moderate text reflection; maintains diversity |
+| s = 7.5 (recommended) | Good balance; text well reflected; good quality; SD3 default |
+| s = 15.0+ | Very strong guidance; excessive text reflection; color saturation; possible artifacts |
 
-s = 15.0+:
-┌─────────────────────────────────────────────────────────────────┐
-│ - 매우 강한 guidance                                            │
-│ - text 과하게 반영                                              │
-│ - 색상 saturation                                               │
-│ - 아티팩트 발생 가능                                            │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### CFG 구현
+### CFG Implementation
 
 ```python
-# Inference 시 CFG 적용
+# Applying CFG during inference
 def denoise_with_cfg(model, x_t, t, text_embed, uncond_embed, guidance_scale):
-    # 1. Conditional 예측
+    # 1. Conditional prediction
     noise_cond = model(x_t, t, text_embed)
-    
-    # 2. Unconditional 예측
-    noise_uncond = model(x_t, t, uncond_embed)
-    
-    # 3. CFG 적용
-    noise_pred = noise_uncond + guidance_scale * (noise_cond - noise_uncond)
-    
-    return noise_pred
 
-"""
-계산 비용:
-- CFG 사용 시 모델 2번 호출 필요 (cond + uncond)
-- 생성 시간 ~2배
-- 하지만 품질 향상 효과가 큼
-"""
+    # 2. Unconditional prediction
+    noise_uncond = model(x_t, t, uncond_embed)
+
+    # 3. Apply CFG
+    noise_pred = noise_uncond + guidance_scale * (noise_cond - noise_uncond)
+
+    return noise_pred
 ```
+
+**Computational cost**:
+- CFG requires 2 model calls (cond + uncond)
+- Generation time approximately doubled
+- Quality improvement is significant
 
 ---
 
 ## Step-by-Step Generation
 
-### 상세 과정
+### Detailed Process
 
 ```python
 def sample(self, model, shape, text_embeds, num_steps=50, ...):
     """
-    전체 샘플링 과정
+    Complete sampling process
     """
     B, C, H, W = shape  # (1, 16, 8, 8)
     device = next(model.parameters()).device
-    
-    # 1. 시드 설정 (재현성)
+
+    # 1. Set seed (reproducibility)
     if seed is not None:
         torch.manual_seed(seed)
-    
-    # 2. 순수 노이즈에서 시작
+
+    # 2. Start from pure noise
     x_t = torch.randn(shape, device=device)  # z_T
-    
-    # 3. Timestep 계산
-    timesteps = [999, 979, 959, ..., 19, 0]  # 50개
-    
-    # 4. 반복적 디노이징
+
+    # 3. Calculate timesteps
+    timesteps = [999, 979, 959, ..., 19, 0]  # 50 values
+
+    # 4. Iterative denoising
     for t in tqdm(timesteps):
         t_batch = torch.full((B,), t, device=device)
-        
+
         # DDIM step
         x_t = ddim_sample(model, x_t, t_batch, text_embeds, eta=0.0)
-    
-    # 5. VAE 디코딩
+
+    # 5. VAE decoding
     if vae_decoder:
         x_t = vae_decoder.decode_from_latent(x_t)
-    
-    # 6. 정규화 [0, 1]
+
+    # 6. Normalize to [0, 1]
     x_t = (x_t + 1.0) / 2.0
     x_t = torch.clamp(x_t, 0.0, 1.0)
-    
+
     return x_t
 ```
 
-### 각 스텝 시각화
+### Generation Progression
 
-```
-Step 0 (t=999): Pure Noise
-┌───────────────────────┐
-│ ░░▓▓░░▓▓░░▓▓░░▓▓░░   │  SNR ≈ 0.001
-│ ▓▓░░▓▓░░▓▓░░▓▓░░▓▓   │  (거의 순수 노이즈)
-│ ░░▓▓░░▓▓░░▓▓░░▓▓░░   │
-│ ▓▓░░▓▓░░▓▓░░▓▓░░▓▓   │
-└───────────────────────┘
+The denoising process transforms random noise into a coherent image through multiple steps:
 
-Step 10 (t=779): Rough Structure
-┌───────────────────────┐
-│   ▓▓▓▓▓▓              │  SNR ≈ 0.1
-│  ▓▓▓▓▓▓▓▓             │  (대략적 형태 보임)
-│ ▓▓▓▓▓▓▓▓▓▓            │
-│  ▓▓▓▓▓▓▓▓             │
-└───────────────────────┘
-
-Step 25 (t=479): Clear Shape
-┌───────────────────────┐
-│    ╭───╮              │  SNR ≈ 1.0
-│   (• •)               │  (명확한 형태)
-│    ╰─╯  /\  /\        │
-│     ╰──╯  ╰╯          │
-└───────────────────────┘
-
-Step 40 (t=199): Fine Details
-┌───────────────────────┐
-│    ╭───╮              │  SNR ≈ 10
-│   (◉ ◉)               │  (세부 디테일)
-│    ╰▽╯  /│\ /│\       │
-│  ~~╰──╯~~╰╯~~         │
-└───────────────────────┘
-
-Step 50 (t=0): Final Image
-┌───────────────────────┐
-│   ╭─────╮             │  SNR → ∞
-│  (◉   ◉)              │  (완성된 이미지)
-│   ╰──▽──╯ /│\ /│\     │
-│ ~~~~╰──╯~~~╰╯~~~~     │
-│      couch            │
-└───────────────────────┘
-```
+1. **Step 0 (t=999)**: Pure noise - SNR ≈ 0.001 (almost pure noise)
+2. **Step 10 (t=779)**: Rough structure begins to emerge - SNR ≈ 0.1
+3. **Step 25 (t=479)**: Clear shapes become visible - SNR ≈ 1.0
+4. **Step 40 (t=199)**: Fine details appear - SNR ≈ 10
+5. **Step 50 (t=0)**: Final image - SNR → ∞ (clean image)
 
 ---
 
 ## Advanced Options
 
-### CLI 옵션
+### CLI Options
 
 ```bash
 uv run main.py --generate \
     --prompt "a cute cat sitting on a couch" \
     --checkpoint checkpoints/diffusion.pt \
     --vae-checkpoint checkpoints/vae.pt \
-    --steps 50 \           # 샘플링 스텝 수
+    --steps 50 \           # Number of sampling steps
     --guidance 7.5 \       # CFG scale
-    --seed 42 \            # 재현성 시드
-    --num-samples 4 \      # 생성할 이미지 수
-    --output output.png    # 출력 파일
+    --seed 42 \            # Reproducibility seed
+    --num-samples 4 \      # Number of images to generate
+    --output output.png    # Output file
 ```
 
-### 파라미터 설명
+### Parameter Descriptions
 
-| 파라미터 | 기본값 | 범위 | 설명 |
-|----------|--------|------|------|
-| `--steps` | 50 | 10-1000 | 샘플링 스텝 수. 높을수록 품질↑, 속도↓ |
-| `--guidance` | 7.5 | 1.0-20.0 | CFG scale. 높을수록 prompt 반영↑ |
-| `--seed` | None | int | 재현성 시드. 같은 시드 = 같은 결과 |
-| `--num-samples` | 1 | 1-16 | 생성할 이미지 수 |
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `--steps` | 50 | 10-1000 | Number of sampling steps. Higher = better quality, slower |
+| `--guidance` | 7.5 | 1.0-20.0 | CFG scale. Higher = stronger prompt reflection |
+| `--seed` | None | int | Reproducibility seed. Same seed = same result |
+| `--num-samples` | 1 | 1-16 | Number of images to generate |
 
 ### Steps vs Quality
 
-```
-Steps와 품질의 관계:
+| Steps | Speed | Quality | Use Case |
+|-------|-------|---------|----------|
+| 10 | Very fast | Low (noisy residue) | Quick prototyping |
+| 25 | Fast | Acceptable | General generation |
+| 50 (recommended) | Moderate | Good | Default setting |
+| 100 | Slow | Very good | High-quality generation |
+| 1000 (DDPM) | Very slow | Best | Research/comparison |
 
-Steps = 10:
-├── 속도: 매우 빠름
-├── 품질: 낮음 (노이즈 잔여)
-└── 용도: 빠른 프로토타이핑
-
-Steps = 25:
-├── 속도: 빠름
-├── 품질: 괜찮음
-└── 용도: 일반적 생성
-
-Steps = 50 (권장):
-├── 속도: 적당
-├── 품질: 좋음
-└── 용도: 기본 설정
-
-Steps = 100:
-├── 속도: 느림
-├── 품질: 매우 좋음
-└── 용도: 고품질 생성
-
-Steps = 1000 (DDPM):
-├── 속도: 매우 느림
-├── 품질: 최고
-└── 용도: 연구/비교
-```
-
-### Seed 사용법
+### Seed Usage
 
 ```python
-# 재현 가능한 생성
+# Reproducible generation
 --seed 42
 
-# 매번 다른 결과
---seed None  # (기본값)
+# Different results each time
+--seed None  # (default)
 
-# 여러 변형 생성
+# Generate multiple variations
 for seed in [42, 43, 44, 45]:
     generate(prompt, seed=seed)
 ```
 
-```
-Seed의 역할:
+**How seed works**:
+1. `torch.manual_seed(42)` is set
+2. Initial noise z_T becomes fixed
+3. With DDIM (eta=0), the entire process is deterministic
+4. Same prompt + seed = same image
 
-seed=42:
-┌─────────────────────────────────────────────────────────────────┐
-│ 1. torch.manual_seed(42) 설정                                  │
-│ 2. 초기 노이즈 z_T가 고정됨                                    │
-│ 3. DDIM (eta=0)이면 전체 과정 결정론적                         │
-│ 4. 같은 prompt + seed = 같은 이미지                            │
-└─────────────────────────────────────────────────────────────────┘
-
-응용:
-- A/B 테스트: 같은 seed로 다른 prompt 비교
-- 버그 재현: 문제 발생 시 seed 기록
-- 갤러리: 좋은 seed 저장해두기
-```
+**Applications**:
+- A/B testing: Compare different prompts with same seed
+- Bug reproduction: Record seed when issues occur
+- Gallery: Save good seeds for reuse
 
 ---
 
 ## Performance Optimization
 
-### 메모리 최적화
+### Memory Optimization
 
 ```python
-# 1. Inference 시 gradient 비활성화
+# 1. Disable gradients during inference
 with torch.no_grad():
     image = generate(prompt)
 
 # 2. Half precision (FP16)
-model = model.half()  # 메모리 50% 절약
+model = model.half()  # 50% memory savings
 vae = vae.half()
 
-# 3. VAE slicing (큰 배치)
+# 3. VAE slicing (for large batches)
 def decode_with_slicing(vae, latents, slice_size=4):
     images = []
     for i in range(0, len(latents), slice_size):
@@ -464,33 +313,33 @@ def decode_with_slicing(vae, latents, slice_size=4):
     return torch.cat(images)
 ```
 
-### 속도 최적화
+### Speed Optimization
 
 ```python
-# 1. 적은 스텝 수
---steps 25  # 대신 50
+# 1. Fewer steps
+--steps 25  # instead of 50
 
 # 2. torch.compile (PyTorch 2.0+)
 model = torch.compile(model)
 
-# 3. 배치 생성
---num-samples 4  # 한 번에 4개 생성 (순차 생성보다 효율적)
+# 3. Batch generation
+--num-samples 4  # Generate 4 at once (more efficient than sequential)
 
-# 4. EMA 모델 사용 (더 좋은 품질 = 적은 스텝 가능)
-ema.apply_shadow()  # EMA weights 적용
+# 4. Use EMA model (better quality = fewer steps needed)
+ema.apply_shadow()  # Apply EMA weights
 ```
 
-### GPU 활용
+### GPU Utilization
 
 ```python
-# 자동 디바이스 감지
+# Automatic device detection
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # MPS (Apple Silicon)
 if torch.backends.mps.is_available():
     device = "mps"
 
-# 다중 GPU (DataParallel)
+# Multi-GPU (DataParallel)
 if torch.cuda.device_count() > 1:
     model = nn.DataParallel(model)
 ```
@@ -500,72 +349,50 @@ if torch.cuda.device_count() > 1:
 ## Interactive Demo
 
 ```bash
-# 대화형 데모 실행
+# Run interactive demo
 uv run main.py --demo
 ```
 
-### Demo 사용법
+### Demo Usage
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                 tiny-stable-diffusion Demo                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  Enter prompt (or 'quit' to exit): a beautiful sunset          │
-│                                                                 │
-│  Generating...                                                  │
-│  [████████████████████████████████████████] 50/50               │
-│                                                                 │
-│  Image saved to: output_0.png                                   │
-│                                                                 │
-│  Enter prompt (or 'quit' to exit): _                           │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+The interactive demo provides a simple interface:
+1. Enter a prompt (or 'quit' to exit)
+2. Watch the generation progress bar
+3. Image is saved automatically
+4. Enter another prompt to continue
 
 ---
 
 ## Troubleshooting
 
-### 일반적인 문제
+### Common Issues
 
-| 문제 | 원인 | 해결책 |
-|------|------|--------|
-| 노이즈가 많은 이미지 | steps 부족 | `--steps 100` 으로 증가 |
-| prompt 반영 안 됨 | guidance 낮음 | `--guidance 10.0` 으로 증가 |
-| 과포화된 색상 | guidance 높음 | `--guidance 5.0` 으로 감소 |
-| CUDA OOM | 메모리 부족 | batch size 줄이기, FP16 사용 |
-| 같은 이미지만 나옴 | seed 고정됨 | `--seed` 제거 |
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Noisy images | Not enough steps | Use `--steps 100` |
+| Prompt not reflected | Guidance too low | Use `--guidance 10.0` |
+| Oversaturated colors | Guidance too high | Use `--guidance 5.0` |
+| CUDA OOM | Out of memory | Reduce batch size, use FP16 |
+| Same image every time | Seed is fixed | Remove `--seed` option |
 
-### 디버깅 체크리스트
+### Debugging Checklist
 
-```
-[ ] Checkpoint 파일이 존재하는가?
-    → checkpoints/diffusion.pt, checkpoints/vae.pt 확인
-
-[ ] CLIP이 설치되어 있는가?
-    → pip install git+https://github.com/openai/CLIP.git
-
-[ ] GPU 메모리가 충분한가?
-    → nvidia-smi로 확인, batch size 줄이기
-
-[ ] 모델 크기가 올바른가?
-    → checkpoint의 model_config와 현재 설정 비교
-
-[ ] Text encoding이 제대로 되는가?
-    → print(text_embeds.shape)로 확인 (B, 512)
-```
+- [ ] Do checkpoint files exist? → Check `checkpoints/diffusion.pt`, `checkpoints/vae.pt`
+- [ ] Is CLIP installed? → `pip install git+https://github.com/openai/CLIP.git`
+- [ ] Is GPU memory sufficient? → Check with `nvidia-smi`, reduce batch size
+- [ ] Is model size correct? → Compare checkpoint's model_config with current settings
+- [ ] Is text encoding working? → Check `print(text_embeds.shape)` outputs (B, 512)
 
 ---
 
-## 코드 예제
+## Code Examples
 
-### Python에서 직접 사용
+### Direct Python Usage
 
 ```python
 from src.inference.generator import generate
 
-# 기본 사용
+# Basic usage
 images = generate(
     prompts=["a cute cat", "a beautiful sunset"],
     checkpoint="checkpoints/diffusion.pt",
@@ -576,7 +403,7 @@ for i, img in enumerate(images):
     img.save(f"output_{i}.png")
 ```
 
-### 커스텀 파이프라인
+### Custom Pipeline
 
 ```python
 import torch
@@ -585,7 +412,7 @@ from src.models.factory import DiT
 from src.models.diffusion import Diffusion
 from src.text_encoder.clip_encoder import CLIPTextEncoder
 
-# 모델 로딩
+# Load models
 device = "cuda"
 
 vae = create_vae()
@@ -598,7 +425,7 @@ dit = DiT(in_channels=16, image_size=8, patch_size=2, model_size="S")
 dit.load_state_dict(torch.load("checkpoints/diffusion.pt")["model_state_dict"])
 dit = dit.to(device).eval()
 
-# Uncond embedding 계산
+# Compute uncond embedding
 uncond_embed = clip.encode([""])
 
 diffusion = Diffusion(
@@ -607,7 +434,7 @@ diffusion = Diffusion(
     uncond_embed=uncond_embed,
 )
 
-# 생성
+# Generate
 prompt = "a robot playing guitar"
 text_embed = clip.encode([prompt])
 
@@ -622,7 +449,7 @@ with torch.no_grad():
         seed=42,
     )
 
-# 이미지 저장
+# Save image
 from PIL import Image
 import numpy as np
 
@@ -633,9 +460,9 @@ Image.fromarray(img).save("output.png")
 
 ---
 
-## 참고 자료
+## References
 
 - [DDIM Paper](https://arxiv.org/abs/2010.02502) - Denoising Diffusion Implicit Models
 - [CFG Paper](https://arxiv.org/abs/2207.12598) - Classifier-Free Diffusion Guidance
-- [Progressive Distillation](https://arxiv.org/abs/2202.00512) - 더 빠른 샘플링
-- [Consistency Models](https://arxiv.org/abs/2303.01469) - 1-step 생성
+- [Progressive Distillation](https://arxiv.org/abs/2202.00512) - Faster sampling
+- [Consistency Models](https://arxiv.org/abs/2303.01469) - 1-step generation
