@@ -32,6 +32,45 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 
+def _build_inference_checkpoint(
+    model: nn.Module,
+    ema: EMA | None,
+    config: dict[str, Any],
+    latent_size: int,
+    in_channels: int,
+    scaling_factor: float,
+) -> dict[str, Any]:
+    """Build a checkpoint dict for inference with model_config metadata.
+
+    Args:
+        model: Diffusion model
+        ema: EMA model (optional)
+        config: Training configuration
+        latent_size: Latent spatial size
+        in_channels: Latent channels
+        scaling_factor: VAE scaling factor
+
+    Returns:
+        Checkpoint dict with model_state_dict, model_config, and optionally ema_state_dict
+    """
+    checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "model_config": {
+            "model_size": config["model_size"],
+            "patch_size": config["patch_size"],
+            "model_type": config.get("model_type", "dit"),
+            "qk_rmsnorm": config.get("qk_rmsnorm", True),
+            "register_tokens": config.get("register_tokens", 0),
+            "latent_size": latent_size,
+            "in_channels": in_channels,
+            "scaling_factor": scaling_factor,
+        },
+    }
+    if ema is not None:
+        checkpoint["ema_state_dict"] = ema.state_dict()
+    return checkpoint
+
+
 def train_one_epoch(
     model: nn.Module,
     diffusion: Diffusion,
@@ -421,9 +460,13 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
         start_epoch = checkpoint_info["epoch"] + 1
         global_step = checkpoint_info.get("global_step", 0)
         best_loss = checkpoint_info["loss"]
-        print(f"Resumed from epoch {checkpoint_info['epoch']}, global_step {global_step}, loss {best_loss:.4f}")
+        print(
+            f"Resumed from epoch {checkpoint_info['epoch']}, global_step {global_step}, loss {best_loss:.4f}"
+        )
     elif resume:
-        print(f"\nResume enabled but no checkpoint found at {checkpoint_path}. Starting from scratch.")
+        print(
+            f"\nResume enabled but no checkpoint found at {checkpoint_path}. Starting from scratch."
+        )
 
     # Mixed precision
     use_amp = config.get("mixed_precision", False) and device.type == "cuda"
@@ -525,21 +568,14 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
             best_val_loss = val_loss
             checkpoint_dir = Path(config.get("checkpoint_dir", "checkpoints"))
             best_val_path = checkpoint_dir / "diffusion_best_val.pt"
-            best_val_checkpoint = {
-                "model_state_dict": model.state_dict(),
-                "model_config": {
-                    "model_size": config["model_size"],
-                    "patch_size": config["patch_size"],
-                    "model_type": config.get("model_type", "dit"),
-                    "qk_rmsnorm": config.get("qk_rmsnorm", True),
-                    "register_tokens": config.get("register_tokens", 0),
-                    "latent_size": latent_size,
-                    "in_channels": in_channels,
-                    "scaling_factor": vae.scaling_factor,
-                },
-            }
-            if ema is not None:
-                best_val_checkpoint["ema_state_dict"] = ema.state_dict()
+            best_val_checkpoint = _build_inference_checkpoint(
+                model=model,
+                ema=ema,
+                config=config,
+                latent_size=latent_size,
+                in_channels=in_channels,
+                scaling_factor=vae.scaling_factor,
+            )
             torch.save(best_val_checkpoint, best_val_path)
             print(f"  New best val loss: {best_val_loss:.4f} (saved to {best_val_path})")
 
@@ -548,21 +584,14 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
         if (epoch + 1) % checkpoint_interval == 0:
             checkpoint_dir = Path(config.get("checkpoint_dir", "checkpoints"))
             periodic_path = checkpoint_dir / f"diffusion_epoch_{epoch + 1}.pt"
-            periodic_checkpoint = {
-                "model_state_dict": model.state_dict(),
-                "model_config": {
-                    "model_size": config["model_size"],
-                    "patch_size": config["patch_size"],
-                    "model_type": config.get("model_type", "dit"),
-                    "qk_rmsnorm": config.get("qk_rmsnorm", True),
-                    "register_tokens": config.get("register_tokens", 0),
-                    "latent_size": latent_size,
-                    "in_channels": in_channels,
-                    "scaling_factor": vae.scaling_factor,
-                },
-            }
-            if ema is not None:
-                periodic_checkpoint["ema_state_dict"] = ema.state_dict()
+            periodic_checkpoint = _build_inference_checkpoint(
+                model=model,
+                ema=ema,
+                config=config,
+                latent_size=latent_size,
+                in_channels=in_channels,
+                scaling_factor=vae.scaling_factor,
+            )
             torch.save(periodic_checkpoint, periodic_path)
             print(f"Saved periodic checkpoint: {periodic_path}")
 
