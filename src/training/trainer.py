@@ -525,18 +525,42 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
             best_val_loss = val_loss
             checkpoint_dir = Path(config.get("checkpoint_dir", "checkpoints"))
             best_val_path = checkpoint_dir / "diffusion_best_val.pt"
-            best_val_checkpoint = {"model_state_dict": model.state_dict()}
+            best_val_checkpoint = {
+                "model_state_dict": model.state_dict(),
+                "model_config": {
+                    "model_size": config["model_size"],
+                    "patch_size": config["patch_size"],
+                    "model_type": config.get("model_type", "dit"),
+                    "qk_rmsnorm": config.get("qk_rmsnorm", True),
+                    "register_tokens": config.get("register_tokens", 0),
+                    "latent_size": latent_size,
+                    "in_channels": in_channels,
+                    "scaling_factor": vae.scaling_factor,
+                },
+            }
             if ema is not None:
                 best_val_checkpoint["ema_state_dict"] = ema.state_dict()
             torch.save(best_val_checkpoint, best_val_path)
             print(f"  New best val loss: {best_val_loss:.4f} (saved to {best_val_path})")
 
-        # Save periodic checkpoint every 10 epochs (weights only for minimal size)
+        # Save periodic checkpoint every 10 epochs (with model_config for inference)
         checkpoint_interval = config.get("checkpoint_interval", 10)
         if (epoch + 1) % checkpoint_interval == 0:
             checkpoint_dir = Path(config.get("checkpoint_dir", "checkpoints"))
             periodic_path = checkpoint_dir / f"diffusion_epoch_{epoch + 1}.pt"
-            periodic_checkpoint = {"model_state_dict": model.state_dict()}
+            periodic_checkpoint = {
+                "model_state_dict": model.state_dict(),
+                "model_config": {
+                    "model_size": config["model_size"],
+                    "patch_size": config["patch_size"],
+                    "model_type": config.get("model_type", "dit"),
+                    "qk_rmsnorm": config.get("qk_rmsnorm", True),
+                    "register_tokens": config.get("register_tokens", 0),
+                    "latent_size": latent_size,
+                    "in_channels": in_channels,
+                    "scaling_factor": vae.scaling_factor,
+                },
+            }
             if ema is not None:
                 periodic_checkpoint["ema_state_dict"] = ema.state_dict()
             torch.save(periodic_checkpoint, periodic_path)

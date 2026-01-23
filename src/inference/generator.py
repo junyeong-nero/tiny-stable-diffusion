@@ -21,6 +21,84 @@ from src.training.checkpoint import find_latest_checkpoint
 from src.utils.common import get_device, set_seed
 
 
+def infer_model_config_from_state_dict(state_dict: dict) -> dict:
+    """Infer model configuration from state dict keys and shapes.
+
+    Args:
+        state_dict: Model state dictionary
+
+    Returns:
+        Dictionary with inferred model configuration
+    """
+    config = {}
+
+    # Detect model type: MMDiT vs DiT
+    is_mmdit = any("mmdit" in k for k in state_dict.keys())
+    config["model_type"] = "mmdit" if is_mmdit else "dit"
+
+    # Count blocks
+    block_indices = set()
+    for k in state_dict.keys():
+        if "blocks." in k:
+            parts = k.split("blocks.")
+            if len(parts) > 1:
+                idx = parts[1].split(".")[0]
+                if idx.isdigit():
+                    block_indices.add(int(idx))
+    num_blocks = len(block_indices)
+
+    # Infer hidden dimension from patch_embed
+    if "model.patch_embed.proj.weight" in state_dict:
+        hidden_dim = state_dict["model.patch_embed.proj.weight"].shape[0]
+        in_channels = state_dict["model.patch_embed.proj.weight"].shape[1]
+        patch_size = state_dict["model.patch_embed.proj.weight"].shape[2]
+        config["in_channels"] = in_channels
+        config["patch_size"] = patch_size
+    else:
+        hidden_dim = None
+
+    # Infer latent_size from pos_embed
+    if "model.pos_embed.pos_embed" in state_dict:
+        num_patches = state_dict["model.pos_embed.pos_embed"].shape[1]
+        # latent_size = sqrt(num_patches) * patch_size
+        import math
+        patch_size = config.get("patch_size", 2)
+        latent_size = int(math.sqrt(num_patches)) * patch_size
+        config["latent_size"] = latent_size
+
+    # Map (num_blocks, hidden_dim) to model_size
+    # Standard sizes: S=12/384, B=12/768, L=24/1024, XL=28/1152
+    if is_mmdit:
+        # MMDiT uses different hidden dims due to joint attention
+        # For MMDiT-B: hidden_dim is typically 768 for text and different for image
+        if num_blocks == 12:
+            if hidden_dim and hidden_dim <= 512:
+                config["model_size"] = "S"
+            else:
+                config["model_size"] = "B"
+        elif num_blocks == 24:
+            config["model_size"] = "L"
+        elif num_blocks == 28:
+            config["model_size"] = "XL"
+        else:
+            config["model_size"] = "B"  # Default
+    else:
+        # DiT standard sizes
+        if num_blocks == 12:
+            if hidden_dim and hidden_dim <= 400:
+                config["model_size"] = "S"
+            else:
+                config["model_size"] = "B"
+        elif num_blocks == 24:
+            config["model_size"] = "L"
+        elif num_blocks == 28:
+            config["model_size"] = "XL"
+        else:
+            config["model_size"] = "B"
+
+    return config
+
+
 @torch.no_grad()
 def generate(
     prompts: list[str],
@@ -31,6 +109,7 @@ def generate(
     guidance_scale: float = 7.5,
     seed: int | None = None,
     device: str = "auto",
+    scaling_factor: float | None = None,
 ) -> list[Image.Image]:
     """Generate images from text prompts using latent-space diffusion.
 
@@ -43,6 +122,7 @@ def generate(
         guidance_scale: Classifier-free guidance scale
         seed: Random seed for reproducibility
         device: Device to use ("auto", "cuda", "mps", "cpu")
+        scaling_factor: VAE scaling factor (overrides checkpoint value if provided)
 
     Returns:
         List of generated PIL images
@@ -77,7 +157,16 @@ def generate(
     print(f"Loading diffusion checkpoint: {checkpoint}")
     ckpt = torch.load(checkpoint, map_location=device)
 
+    # Try to get config from checkpoint, or infer from state_dict
     model_config = ckpt.get("model_config", ckpt.get("config", {}))
+
+    # If no config in checkpoint, infer from state_dict
+    if not model_config and "model_state_dict" in ckpt:
+        print("No config in checkpoint, inferring from state_dict...")
+        inferred_config = infer_model_config_from_state_dict(ckpt["model_state_dict"])
+        model_config = inferred_config
+        print(f"  Inferred config: {model_config}")
+
     model_size = model_config.get("model_size", "S")
     patch_size = model_config.get("patch_size", 2)
     model_type = model_config.get("model_type", "dit")
@@ -108,12 +197,15 @@ def generate(
     vae = vae.to(device)
     vae.eval()
 
-    # Set scaling factor from config or checkpoint
-    scaling_factor = model_config.get("scaling_factor", 1.0)
-    if isinstance(scaling_factor, (int, float)) and scaling_factor != "auto":
+    # Set scaling factor: argument > checkpoint > config > default
+    if scaling_factor is not None:
         vae.set_scaling_factor(float(scaling_factor))
     elif "scaling_factor" in vae_state:
         vae.set_scaling_factor(vae_state["scaling_factor"])
+    else:
+        config_sf = model_config.get("scaling_factor", 1.0)
+        if isinstance(config_sf, (int, float)) and config_sf != "auto":
+            vae.set_scaling_factor(float(config_sf))
     print(f"VAE scaling_factor: {vae.scaling_factor:.4f}")
 
     # Load DiT model
