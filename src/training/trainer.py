@@ -132,6 +132,55 @@ def train_one_epoch(
 
 
 @torch.no_grad()
+def validate_one_epoch(
+    model: nn.Module,
+    diffusion: Diffusion,
+    dataloader: DataLoader,
+    clip_encoder: CLIPTextEncoder,
+    vae_encoder: AutoencoderKL,
+    device: torch.device,
+) -> float:
+    """Validate for one epoch on latent space.
+
+    Args:
+        model: Diffusion model (operates on latent space)
+        diffusion: Diffusion process
+        dataloader: Validation data loader
+        clip_encoder: CLIP text encoder
+        vae_encoder: Frozen VAE encoder for image-to-latent conversion
+        device: Device to validate on
+
+    Returns:
+        Average validation loss
+    """
+    model.eval()
+    total_loss = 0.0
+    step_count = 0
+
+    for batch in dataloader:
+        images = batch["image"].to(device)
+        captions = batch["caption"]
+
+        # Encode images to latent space using frozen VAE
+        latents = vae_encoder.encode_to_latent(images)
+        text_embeds = clip_encoder.encode(captions)
+        text_embeds = text_embeds.to(device)
+
+        # Sample timesteps using logit-normal distribution (SD3 style)
+        timesteps = diffusion.sample_timesteps_logit_normal(
+            batch_size=latents.shape[0],
+            device=device,
+        )
+
+        loss = diffusion.training_loss(model, latents, timesteps, text_embeds)
+
+        total_loss += loss.item()
+        step_count += 1
+
+    return total_loss / max(step_count, 1)
+
+
+@torch.no_grad()
 def generate_samples(
     model: nn.Module,
     diffusion: Diffusion,
@@ -188,7 +237,7 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
         config: Training configuration dictionary
         use_wandb: Enable wandb logging
     """
-    from src.data.loader import create_dataloader, get_dataset
+    from src.data.loader import create_dataloader, create_train_val_dataloaders, get_dataset
     from src.models.factory import DiT
     from src.utils.common import get_device, set_seed
 
@@ -218,23 +267,29 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
     device = get_device(config["device"])
     print(f"Using device: {device}")
 
-    # Load dataset
-    dataset = get_dataset(config)
-    if hasattr(dataset, "__len__"):
-        print(f"Dataset size: {len(dataset)}")
-        if len(dataset) == 0:
-            print("Error: Dataset is empty!")
-            return
-    else:
-        print("Dataset: streaming mode (size unknown)")
+    # Load dataset with train/val split
+    val_split = config.get("val_split", 0.1)
+    stream = config.get("stream", False)
 
-    dataloader = create_dataloader(
-        dataset,
-        batch_size=config["batch_size"],
-        shuffle=True,
-        num_workers=0,
-        pin_memory=True,
-    )
+    if stream:
+        # Streaming mode: no validation split
+        dataset = get_dataset(config)
+        print("Dataset: streaming mode (size unknown, no validation split)")
+        dataloader = create_dataloader(
+            dataset,
+            batch_size=config["batch_size"],
+            shuffle=True,
+            num_workers=0,
+            pin_memory=True,
+        )
+        val_dataloader = None
+    else:
+        # Non-streaming mode: use train/val split
+        dataloader, val_dataloader = create_train_val_dataloaders(config, val_split=val_split)
+        if hasattr(dataloader.dataset, "__len__"):
+            print(f"Train dataset size: {len(dataloader.dataset)}")
+        if val_dataloader is not None and hasattr(val_dataloader.dataset, "__len__"):
+            print(f"Validation dataset size: {len(val_dataloader.dataset)}")
 
     # Load pre-trained VAE
     vae_checkpoint = config.get("vae_checkpoint", "checkpoints/vae.pt")
@@ -384,6 +439,9 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
     diffusion.cfg_probability = initial_cfg
     print(f"Initial CFG probability: {initial_cfg}")
 
+    # Track best validation loss
+    best_val_loss = float("inf")
+
     # Training loop
     if start_epoch > 0:
         print(f"\nResuming diffusion training from epoch {start_epoch + 1}/{config['epochs']}...")
@@ -417,18 +475,34 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
             global_step=global_step,
         )
 
-        print(f"Epoch {epoch + 1}/{config['epochs']}: Avg Loss = {avg_loss:.4f}")
+        # Compute validation loss if validation dataloader is available
+        val_loss = None
+        if val_dataloader is not None:
+            val_loss = validate_one_epoch(
+                model=model,
+                diffusion=diffusion,
+                dataloader=val_dataloader,
+                clip_encoder=clip_encoder,
+                vae_encoder=vae,
+                device=device,
+            )
+            val_loss_str = f", Val Loss = {val_loss:.4f}"
+        else:
+            val_loss_str = ""
+
+        print(f"Epoch {epoch + 1}/{config['epochs']}: Train Loss = {avg_loss:.4f}{val_loss_str}")
 
         # Log epoch metrics to wandb
+        epoch_metrics = {
+            "epoch/train_loss": avg_loss,
+            "epoch/epoch": epoch + 1,
+            "epoch/cfg_probability": diffusion.cfg_probability,
+        }
+        if val_loss is not None:
+            epoch_metrics["epoch/val_loss"] = val_loss
+
         if use_wandb and WANDB_AVAILABLE:
-            wandb.log(
-                {
-                    "epoch/avg_loss": avg_loss,
-                    "epoch/epoch": epoch + 1,
-                    "epoch/cfg_probability": diffusion.cfg_probability,
-                },
-                step=global_step,
-            )
+            wandb.log(epoch_metrics, step=global_step)
 
         # Save checkpoint (always save for resume support)
         save_checkpoint(
@@ -445,6 +519,17 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
         )
         if avg_loss < best_loss:
             best_loss = avg_loss
+
+        # Save best validation checkpoint if validation loss improved
+        if val_loss is not None and val_loss < best_val_loss:
+            best_val_loss = val_loss
+            checkpoint_dir = Path(config.get("checkpoint_dir", "checkpoints"))
+            best_val_path = checkpoint_dir / "diffusion_best_val.pt"
+            best_val_checkpoint = {"model_state_dict": model.state_dict()}
+            if ema is not None:
+                best_val_checkpoint["ema_state_dict"] = ema.state_dict()
+            torch.save(best_val_checkpoint, best_val_path)
+            print(f"  New best val loss: {best_val_loss:.4f} (saved to {best_val_path})")
 
         # Save periodic checkpoint every 10 epochs (weights only for minimal size)
         checkpoint_interval = config.get("checkpoint_interval", 10)
@@ -486,7 +571,9 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
 
     print("\n" + "=" * 60)
     print("Diffusion Training complete!")
-    print(f"Best loss: {best_loss:.4f}")
+    print(f"Best train loss: {best_loss:.4f}")
+    if val_dataloader is not None:
+        print(f"Best val loss: {best_val_loss:.4f}")
     print(f"Checkpoint: {config['checkpoint_path']}")
     print("=" * 60)
 

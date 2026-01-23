@@ -194,6 +194,47 @@ def train_vae_one_epoch(
 
 
 @torch.no_grad()
+def validate_vae_one_epoch(
+    model: AutoencoderKL,
+    dataloader: DataLoader,
+    device: torch.device,
+    kl_weight: float = 1e-3,
+) -> dict[str, float]:
+    """Validate VAE for one epoch.
+
+    Args:
+        model: VAE model
+        dataloader: Validation data loader
+        device: Device to validate on
+        kl_weight: KL weight for loss calculation
+
+    Returns:
+        Dictionary with validation metrics
+    """
+    model.eval()
+    total_loss = 0.0
+    total_recon_loss = 0.0
+    total_kl_loss = 0.0
+    num_batches = 0
+
+    for batch in dataloader:
+        images = batch["image"].to(device)
+        _, loss_dict = model.training_loss(images, kl_weight=kl_weight)
+
+        total_loss += loss_dict["total_loss"]
+        total_recon_loss += loss_dict["recon_loss"]
+        total_kl_loss += loss_dict["kl_loss"]
+        num_batches += 1
+
+    num_batches = max(1, num_batches)
+    return {
+        "val_loss": total_loss / num_batches,
+        "val_recon_loss": total_recon_loss / num_batches,
+        "val_kl_loss": total_kl_loss / num_batches,
+    }
+
+
+@torch.no_grad()
 def generate_vae_samples(
     model: AutoencoderKL,
     dataloader: DataLoader,
@@ -232,7 +273,7 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
     """
     import math
 
-    from src.data.loader import create_dataloader, get_dataset
+    from src.data.loader import create_dataloader, create_train_val_dataloaders, get_dataset
     from src.utils.common import get_device, set_seed
 
     print("=" * 60)
@@ -274,23 +315,29 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
     device = get_device(config["device"])
     print(f"Using device: {device}")
 
-    # Load dataset
-    dataset = get_dataset(config)
-    if hasattr(dataset, "__len__"):
-        print(f"Dataset size: {len(dataset)}")
-        if len(dataset) == 0:
-            print("Error: Dataset is empty!")
-            return
-    else:
-        print("Dataset: streaming mode (size unknown)")
+    # Load dataset with train/val split
+    val_split = config.get("val_split", 0.1)
+    stream = config.get("stream", False)
 
-    dataloader = create_dataloader(
-        dataset,
-        batch_size=config["batch_size"],
-        shuffle=True,
-        num_workers=0,
-        pin_memory=True,
-    )
+    if stream:
+        # Streaming mode: no validation split
+        dataset = get_dataset(config)
+        print("Dataset: streaming mode (size unknown, no validation split)")
+        dataloader = create_dataloader(
+            dataset,
+            batch_size=config["batch_size"],
+            shuffle=True,
+            num_workers=0,
+            pin_memory=True,
+        )
+        val_dataloader = None
+    else:
+        # Non-streaming mode: use train/val split
+        dataloader, val_dataloader = create_train_val_dataloaders(config, val_split=val_split)
+        if hasattr(dataloader.dataset, "__len__"):
+            print(f"Train dataset size: {len(dataloader.dataset)}")
+        if val_dataloader is not None and hasattr(val_dataloader.dataset, "__len__"):
+            print(f"Validation dataset size: {len(val_dataloader.dataset)}")
 
     # Initialize VAE model
     print("Initializing VAE model...")
@@ -371,6 +418,9 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
     if kl_annealing == "cyclical":
         print(f"  Cycles: {kl_n_cycles}, Ratio: {kl_cycle_ratio}")
 
+    # Track best validation loss
+    best_val_loss = float("inf")
+
     # Training loop
     if start_epoch > 0:
         print(f"\nResuming VAE training from epoch {start_epoch + 1}/{config['epochs']}...")
@@ -423,23 +473,39 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
         else:
             cycle_info = ""
 
-        print(f"Epoch {epoch + 1}/{config['epochs']}: Loss={avg_loss:.4f} | "
+        # Compute validation loss if validation dataloader is available
+        val_metrics = None
+        if val_dataloader is not None:
+            val_metrics = validate_vae_one_epoch(
+                model=model,
+                dataloader=val_dataloader,
+                device=device,
+                kl_weight=current_kl_weight,
+            )
+            val_loss_str = f" | Val Loss={val_metrics['val_loss']:.4f}"
+        else:
+            val_loss_str = ""
+
+        print(f"Epoch {epoch + 1}/{config['epochs']}: Train Loss={avg_loss:.4f}{val_loss_str} | "
               f"β={current_kl_weight:.1e}{cycle_info} | "
               f"Latent μ={latent_mean:.3f}, σ={latent_std:.3f} [target: μ≈0, σ≈1]")
 
         # Log epoch metrics to wandb
+        epoch_metrics = {
+            "epoch/train_loss": avg_loss,
+            "epoch/epoch": epoch + 1,
+            "epoch/kl_weight": current_kl_weight,
+            "epoch/latent_mean": latent_mean,
+            "epoch/latent_mean_std": latent_mean_std,
+            "epoch/latent_std": latent_std,
+        }
+        if val_metrics is not None:
+            epoch_metrics["epoch/val_loss"] = val_metrics["val_loss"]
+            epoch_metrics["epoch/val_recon_loss"] = val_metrics["val_recon_loss"]
+            epoch_metrics["epoch/val_kl_loss"] = val_metrics["val_kl_loss"]
+
         if use_wandb and WANDB_AVAILABLE:
-            wandb.log(
-                {
-                    "epoch/vae_loss": avg_loss,
-                    "epoch/epoch": epoch + 1,
-                    "epoch/kl_weight": current_kl_weight,
-                    "epoch/latent_mean": latent_mean,
-                    "epoch/latent_mean_std": latent_mean_std,
-                    "epoch/latent_std": latent_std,
-                },
-                step=global_step,
-            )
+            wandb.log(epoch_metrics, step=global_step)
 
         # Save checkpoint (always save for resume support)
         save_checkpoint(
@@ -455,6 +521,13 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
         )
         if avg_loss < best_loss:
             best_loss = avg_loss
+
+        # Save best validation checkpoint if validation loss improved
+        if val_metrics is not None and val_metrics["val_loss"] < best_val_loss:
+            best_val_loss = val_metrics["val_loss"]
+            best_val_path = checkpoint_path.parent / "vae_best_val.pt"
+            torch.save({"model_state_dict": model.state_dict()}, best_val_path)
+            print(f"  New best val loss: {best_val_loss:.4f} (saved to {best_val_path})")
 
         # Save periodic checkpoint every 10 epochs (weights only for minimal size)
         checkpoint_interval = config.get("checkpoint_interval", 10)
@@ -494,7 +567,9 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
 
     print("\n" + "=" * 60)
     print("VAE Training complete!")
-    print(f"Best loss: {best_loss:.4f}")
+    print(f"Best train loss: {best_loss:.4f}")
+    if val_dataloader is not None:
+        print(f"Best val loss: {best_val_loss:.4f}")
     print(f"Checkpoint: {config['checkpoint_path']}")
     print("=" * 60)
 

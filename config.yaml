@@ -53,6 +53,10 @@ vae_train:
   device: auto
   seed: 42
 
+  # ─── Validation ──────────────────────────────────────────────────────────
+  val_split: 0.1                      # Fraction of data for validation (0.0-1.0)
+  validation_interval: 10             # Generate samples every N epochs
+
   # ─── Checkpoint ────────────────────────────────────────────────────────────
   checkpoint_path: checkpoints/vae.pt
   checkpoint_interval: 10             # Save every N epochs
@@ -138,6 +142,7 @@ diffusion_train:
   resume: false                       # Resume from checkpoint
 
   # ─── Validation ────────────────────────────────────────────────────────────
+  val_split: 0.1                      # Fraction of data for validation (0.0-1.0)
   validation_prompts:
     - a photo of a fluffy Persian cat
     - a golden retriever sitting on grass
