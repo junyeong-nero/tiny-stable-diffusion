@@ -23,13 +23,7 @@ from src.models.vae import AutoencoderKL, create_vae
 from src.text_encoder.clip_encoder import CLIPTextEncoder
 from src.training.checkpoint import load_checkpoint, save_checkpoint
 from src.training.ema import EMA
-
-try:
-    import wandb
-
-    WANDB_AVAILABLE = True
-except ImportError:
-    WANDB_AVAILABLE = False
+from src.training.wandb_logger import WandbLogger
 
 
 def _build_inference_checkpoint(
@@ -83,7 +77,7 @@ def train_one_epoch(
     ema: EMA | None = None,
     use_amp: bool = False,
     scaler: torch.cuda.amp.GradScaler | None = None,
-    use_wandb: bool = False,
+    logger: WandbLogger | None = None,
     global_step: int = 0,
 ) -> tuple[float, int]:
     """Train for one epoch on latent space.
@@ -100,7 +94,7 @@ def train_one_epoch(
         ema: EMA model (optional)
         use_amp: Use automatic mixed precision
         scaler: Gradient scaler for AMP
-        use_wandb: Log to wandb
+        logger: WandbLogger instance (optional)
         global_step: Current global step
 
     Returns:
@@ -155,8 +149,8 @@ def train_one_epoch(
         step_count += 1
         progress_bar.set_postfix({"loss": loss_value})
 
-        if use_wandb and WANDB_AVAILABLE:
-            wandb.log(
+        if logger is not None:
+            logger.log(
                 {
                     "train/loss": loss_value,
                     "train/learning_rate": scheduler.get_last_lr()[0],
@@ -289,18 +283,13 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
         print(f"  {key}: {value}")
     print()
 
-    # Initialize wandb
-    if use_wandb:
-        if not WANDB_AVAILABLE:
-            print("Warning: wandb not installed. Disabling wandb logging.")
-            use_wandb = False
-        else:
-            wandb.init(
-                project=config.get("wandb_project", "tiny-stable-diffusion"),
-                name=config.get("wandb_run_name", "diffusion-training"),
-                config=config,
-            )
-            print("Wandb logging enabled")
+    # Initialize wandb logger
+    logger = WandbLogger(
+        enabled=use_wandb,
+        project=config.get("wandb_project", "tiny-stable-diffusion"),
+        run_name=config.get("wandb_run_name", "diffusion-training"),
+        config=config,
+    )
 
     set_seed(config["seed"])
     device = get_device(config["device"])
@@ -514,7 +503,7 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
             device=device,
             use_amp=use_amp,
             scaler=scaler,
-            use_wandb=use_wandb,
+            logger=logger,
             global_step=global_step,
         )
 
@@ -544,8 +533,7 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
         if val_loss is not None:
             epoch_metrics["epoch/val_loss"] = val_loss
 
-        if use_wandb and WANDB_AVAILABLE:
-            wandb.log(epoch_metrics, step=global_step)
+        logger.log(epoch_metrics, step=global_step)
 
         # Save checkpoint (always save for resume support)
         save_checkpoint(
@@ -630,5 +618,4 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
     print(f"Checkpoint: {config['checkpoint_path']}")
     print("=" * 60)
 
-    if use_wandb and WANDB_AVAILABLE:
-        wandb.finish()
+    logger.finish()

@@ -13,13 +13,7 @@ from tqdm import tqdm
 
 from src.models.vae import AutoencoderKL, create_vae
 from src.training.checkpoint import load_checkpoint, save_checkpoint
-
-try:
-    import wandb
-
-    WANDB_AVAILABLE = True
-except ImportError:
-    WANDB_AVAILABLE = False
+from src.training.wandb_logger import WandbLogger
 
 
 def get_kl_weight(
@@ -86,7 +80,7 @@ def train_vae_one_epoch(
     total_steps: int = 0,
     use_amp: bool = False,
     scaler: torch.cuda.amp.GradScaler | None = None,
-    use_wandb: bool = False,
+    logger: WandbLogger | None = None,
     global_step: int = 0,
 ) -> tuple[float, int]:
     """Train VAE for one epoch.
@@ -104,7 +98,7 @@ def train_vae_one_epoch(
         total_steps: Total training steps (for annealing schedule)
         use_amp: Use automatic mixed precision
         scaler: Gradient scaler for AMP
-        use_wandb: Log to wandb
+        logger: WandbLogger instance (optional)
         global_step: Current global step
 
     Returns:
@@ -170,8 +164,8 @@ def train_vae_one_epoch(
             }
         )
 
-        if use_wandb and WANDB_AVAILABLE:
-            wandb.log(
+        if logger is not None:
+            logger.log(
                 {
                     "vae/total_loss": loss_dict["total_loss"],
                     "vae/recon_loss": loss_dict["recon_loss"],
@@ -285,31 +279,23 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
         print(f"  {key}: {value}")
     print()
 
-    # Initialize wandb
+    # Load wandb_run_id from checkpoint if resuming
     resume = config.get("resume", False)
     checkpoint_path = Path(config["checkpoint_path"])
     wandb_run_id = None
 
-    # Load wandb_run_id from checkpoint if resuming
     if resume and checkpoint_path.exists():
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         wandb_run_id = checkpoint.get("wandb_run_id")
 
-    if use_wandb:
-        if not WANDB_AVAILABLE:
-            print("Warning: wandb not installed. Disabling wandb logging.")
-            use_wandb = False
-        else:
-            wandb.init(
-                project=config.get("wandb_project", "tiny-stable-diffusion"),
-                name=config.get("wandb_run_name", "vae-training"),
-                config=config,
-                id=wandb_run_id,
-                resume="allow" if wandb_run_id else None,
-            )
-            # Save run id for future resume
-            wandb_run_id = wandb.run.id
-            print(f"Wandb logging enabled (run_id: {wandb_run_id})")
+    # Initialize wandb logger
+    logger = WandbLogger(
+        enabled=use_wandb,
+        project=config.get("wandb_project", "tiny-stable-diffusion"),
+        run_name=config.get("wandb_run_name", "vae-training"),
+        config=config,
+        run_id=wandb_run_id,
+    )
 
     set_seed(config["seed"])
     device = get_device(config["device"])
@@ -441,7 +427,7 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
             total_steps=total_steps,
             use_amp=use_amp,
             scaler=scaler,
-            use_wandb=use_wandb,
+            logger=logger,
             global_step=global_step,
         )
 
@@ -504,8 +490,7 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
             epoch_metrics["epoch/val_recon_loss"] = val_metrics["val_recon_loss"]
             epoch_metrics["epoch/val_kl_loss"] = val_metrics["val_kl_loss"]
 
-        if use_wandb and WANDB_AVAILABLE:
-            wandb.log(epoch_metrics, step=global_step)
+        logger.log(epoch_metrics, step=global_step)
 
         # Save checkpoint (always save for resume support)
         save_checkpoint(
@@ -517,7 +502,7 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
             path=checkpoint_path,
             config=config,
             global_step=global_step,
-            wandb_run_id=wandb_run_id,
+            wandb_run_id=logger.run_id,
         )
         if avg_loss < best_loss:
             best_loss = avg_loss
@@ -573,5 +558,4 @@ def train_vae(config: dict[str, Any], use_wandb: bool = False) -> None:
     print(f"Checkpoint: {config['checkpoint_path']}")
     print("=" * 60)
 
-    if use_wandb and WANDB_AVAILABLE:
-        wandb.finish()
+    logger.finish()
