@@ -398,6 +398,7 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
         guidance_scale=config["guidance_scale"],
         cfg_probability=config.get("cfg_prob", config.get("initial_cfg_prob", 0.1)),
         uncond_embed=uncond_embed,
+        min_snr_gamma=config.get("min_snr_gamma", 5.0),
     )
 
     # Optimizer

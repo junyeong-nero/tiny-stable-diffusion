@@ -121,6 +121,11 @@ diffusion_train:
   num_timesteps: 1000
   guidance_scale: 7.5
 
+  # ─── Min-SNR Loss Weighting ───────────────────────────────────────────────
+  # Reference: "Efficient Diffusion Training via Min-SNR Weighting Strategy" (ICCV 2023)
+  # Clamps loss weights for high-SNR timesteps, improving training efficiency (3.4x faster)
+  min_snr_gamma: 5.0                  # Recommended value from paper (null to disable)
+
   # ─── Timestep Sampling (SD3 Logit-Normal) ──────────────────────────────────
   use_logit_normal_sampling: true
   logit_mean: 0.0

@@ -35,6 +35,7 @@ class Diffusion:
         guidance_scale: float = 7.5,
         cfg_probability: float = 0.1,
         uncond_embed: torch.Tensor | None = None,
+        min_snr_gamma: float | None = 5.0,
     ) -> None:
         """Initialize Rectified Flow diffusion.
 
@@ -43,11 +44,14 @@ class Diffusion:
             guidance_scale: CFG guidance scale for sampling
             cfg_probability: Probability of dropping text conditioning during training
             uncond_embed: Pre-computed unconditional embedding for CFG
+            min_snr_gamma: Min-SNR gamma for loss weighting (None to disable)
+                           Reference: "Efficient Diffusion Training via Min-SNR Weighting Strategy"
         """
         self.num_timesteps = num_timesteps
         self.guidance_scale = guidance_scale
         self.cfg_probability = cfg_probability
         self.uncond_embed = uncond_embed
+        self.min_snr_gamma = min_snr_gamma
 
     def q_sample(
         self,
@@ -98,6 +102,53 @@ class Diffusion:
             Target velocity (B, C, H, W)
         """
         return noise - x_0
+
+    def get_snr(self, timesteps: torch.Tensor) -> torch.Tensor:
+        """Compute Signal-to-Noise Ratio for Rectified Flow.
+
+        For Rectified Flow: x_t = (1-t)*x_0 + t*noise
+        Signal coefficient: (1-t)
+        Noise coefficient: t
+        SNR = signal² / noise² = (1-t)² / t²
+
+        Args:
+            timesteps: Timestep indices (B,) in range [0, num_timesteps-1]
+
+        Returns:
+            SNR values (B,)
+        """
+        # Normalize timesteps to [0, 1], add small epsilon to avoid division by zero
+        t = timesteps.float() / self.num_timesteps
+        t = torch.clamp(t, min=1e-5, max=1.0 - 1e-5)
+
+        # SNR = (1-t)² / t²
+        snr = ((1.0 - t) ** 2) / (t**2)
+        return snr
+
+    def get_min_snr_weight(self, timesteps: torch.Tensor) -> torch.Tensor:
+        """Compute Min-SNR loss weights.
+
+        Min-SNR-γ weighting: weight = min(SNR, γ) / SNR
+        This clamps the loss weight for high-SNR (low noise) timesteps.
+
+        Reference: "Efficient Diffusion Training via Min-SNR Weighting Strategy" (ICCV 2023)
+
+        Args:
+            timesteps: Timestep indices (B,) in range [0, num_timesteps-1]
+
+        Returns:
+            Loss weights (B,)
+        """
+        if self.min_snr_gamma is None:
+            return torch.ones(timesteps.shape[0], device=timesteps.device)
+
+        snr = self.get_snr(timesteps)
+
+        # Min-SNR weight: min(SNR, gamma) / SNR
+        # Equivalent to: min(1, gamma / SNR)
+        weights = torch.clamp(snr, max=self.min_snr_gamma) / snr
+
+        return weights
 
     def euler_step(
         self,
@@ -258,16 +309,29 @@ class Diffusion:
                 text_embeds = text_embeds.clone()
                 uncond_embed = self.uncond_embed.to(x_0.device)
 
-                # Replace dropped samples with unconditional embedding
-                for i in range(batch_size):
-                    if drop_mask[i]:
-                        text_embeds[i] = uncond_embed[0]
+                # Expand uncond_embed to batch size for vectorized operation
+                uncond_expanded = uncond_embed.expand(batch_size, -1)
+
+                # Replace dropped samples with unconditional embedding (vectorized)
+                text_embeds = torch.where(
+                    drop_mask.unsqueeze(-1), uncond_expanded, text_embeds
+                )
 
         # Predict velocity
         v_pred = model(x_t, timesteps, text_embeds)
 
-        # MSE loss on velocity
-        loss = nn.functional.mse_loss(v_pred, v_target)
+        # Compute per-sample MSE loss (reduce over C, H, W, keep batch dimension)
+        per_sample_loss = nn.functional.mse_loss(
+            v_pred, v_target, reduction="none"
+        ).mean(dim=(1, 2, 3))
+
+        # Apply Min-SNR weighting
+        if self.min_snr_gamma is not None:
+            snr_weights = self.get_min_snr_weight(timesteps)
+            per_sample_loss = per_sample_loss * snr_weights
+
+        # Mean over batch
+        loss = per_sample_loss.mean()
 
         return loss
 
@@ -312,6 +376,7 @@ class Diffusion:
             f"num_timesteps={self.num_timesteps}, "
             f"guidance_scale={self.guidance_scale}, "
             f"cfg_probability={self.cfg_probability}, "
+            f"min_snr_gamma={self.min_snr_gamma}, "
             f"type=RectifiedFlow)"
         )
 

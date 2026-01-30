@@ -5,7 +5,7 @@
 .ruff_cache/
 wandb/
 CLAUDE.md
-AGNETS.md
+AGENTS.md
 
 # Model checkpoints
 checkpoints/
