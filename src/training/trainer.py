@@ -79,6 +79,7 @@ def train_one_epoch(
     scaler: torch.cuda.amp.GradScaler | None = None,
     logger: WandbLogger | None = None,
     global_step: int = 0,
+    use_logit_normal_sampling: bool = True,
 ) -> tuple[float, int]:
     """Train for one epoch on latent space.
 
@@ -96,6 +97,7 @@ def train_one_epoch(
         scaler: Gradient scaler for AMP
         logger: WandbLogger instance (optional)
         global_step: Current global step
+        use_logit_normal_sampling: Use logit-normal (True) or uniform (False) timestep sampling
 
     Returns:
         Tuple of (average loss, updated global step)
@@ -117,11 +119,17 @@ def train_one_epoch(
             text_embeds = clip_encoder.encode(captions)
             text_embeds = text_embeds.to(device)
 
-        # Sample timesteps using logit-normal distribution (SD3 style)
-        timesteps = diffusion.sample_timesteps_logit_normal(
-            batch_size=latents.shape[0],
-            device=device,
-        )
+        # Sample timesteps
+        if use_logit_normal_sampling:
+            timesteps = diffusion.sample_timesteps_logit_normal(
+                batch_size=latents.shape[0],
+                device=device,
+            )
+        else:
+            timesteps = diffusion.sample_timesteps_uniform(
+                batch_size=latents.shape[0],
+                device=device,
+            )
 
         optimizer.zero_grad()
 
@@ -172,6 +180,7 @@ def validate_one_epoch(
     clip_encoder: CLIPTextEncoder,
     vae_encoder: AutoencoderKL,
     device: torch.device,
+    use_logit_normal_sampling: bool = True,
 ) -> float:
     """Validate for one epoch on latent space.
 
@@ -182,6 +191,7 @@ def validate_one_epoch(
         clip_encoder: CLIP text encoder
         vae_encoder: Frozen VAE encoder for image-to-latent conversion
         device: Device to validate on
+        use_logit_normal_sampling: Use logit-normal (True) or uniform (False) timestep sampling
 
     Returns:
         Average validation loss
@@ -199,11 +209,17 @@ def validate_one_epoch(
         text_embeds = clip_encoder.encode(captions)
         text_embeds = text_embeds.to(device)
 
-        # Sample timesteps using logit-normal distribution (SD3 style)
-        timesteps = diffusion.sample_timesteps_logit_normal(
-            batch_size=latents.shape[0],
-            device=device,
-        )
+        # Sample timesteps
+        if use_logit_normal_sampling:
+            timesteps = diffusion.sample_timesteps_logit_normal(
+                batch_size=latents.shape[0],
+                device=device,
+            )
+        else:
+            timesteps = diffusion.sample_timesteps_uniform(
+                batch_size=latents.shape[0],
+                device=device,
+            )
 
         loss = diffusion.training_loss(model, latents, timesteps, text_embeds)
 
@@ -472,6 +488,10 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
     diffusion.cfg_probability = initial_cfg
     print(f"Initial CFG probability: {initial_cfg}")
 
+    # Timestep sampling strategy
+    use_logit_normal_sampling = config.get("use_logit_normal_sampling", True)
+    print(f"Timestep sampling: {'logit-normal' if use_logit_normal_sampling else 'uniform'}")
+
     # Track best validation loss
     best_val_loss = float("inf")
 
@@ -506,6 +526,7 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
             scaler=scaler,
             logger=logger,
             global_step=global_step,
+            use_logit_normal_sampling=use_logit_normal_sampling,
         )
 
         # Compute validation loss if validation dataloader is available
@@ -518,6 +539,7 @@ def train_diffusion(config: dict[str, Any], use_wandb: bool = False) -> None:
                 clip_encoder=clip_encoder,
                 vae_encoder=vae,
                 device=device,
+                use_logit_normal_sampling=use_logit_normal_sampling,
             )
             val_loss_str = f", Val Loss = {val_loss:.4f}"
         else:

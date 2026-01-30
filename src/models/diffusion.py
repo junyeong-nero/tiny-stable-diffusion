@@ -370,6 +370,25 @@ class Diffusion:
 
         return timesteps
 
+    def sample_timesteps_uniform(
+        self,
+        batch_size: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Sample timesteps using uniform distribution.
+
+        Uniform sampling gives equal probability to all timesteps,
+        which ensures balanced training across all noise levels.
+
+        Args:
+            batch_size: Number of timesteps to sample
+            device: Device to create tensor on
+
+        Returns:
+            Timestep indices (B,) in range [0, num_timesteps-1]
+        """
+        return torch.randint(0, self.num_timesteps, (batch_size,), device=device)
+
     def __repr__(self) -> str:
         return (
             f"Diffusion("
