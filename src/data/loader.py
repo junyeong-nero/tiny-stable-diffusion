@@ -6,7 +6,7 @@ from typing import Any
 
 from torch.utils.data import DataLoader, Dataset, IterableDataset, Subset
 
-from src.data.dataset import CaptionDataset, StreamingCaptionDataset
+from src.data.dataset import CaptionDataset, StreamingCaptionDataset, WebDatasetCaptionDataset
 
 
 def get_dataset(config: dict[str, Any]) -> Dataset:
@@ -20,14 +20,26 @@ def get_dataset(config: dict[str, Any]) -> Dataset:
             - dataset_name: HuggingFace dataset name
             - stream: If True, use StreamingCaptionDataset (IterableDataset)
                       If False, use CaptionDataset (map-style Dataset)
+            - use_webdataset: If True, use WebDatasetCaptionDataset for tar files
             - Other settings: split, image_field, caption_field, etc.
 
     Returns:
         Dataset instance
     """
     stream = config.get("stream", False)
+    use_webdataset = config.get("use_webdataset", False)
 
-    if stream:
+    if use_webdataset:
+        # WebDataset format (tar files, e.g., pixparse/cc3m-wds)
+        return WebDatasetCaptionDataset(
+            dataset_name=config.get("dataset_name"),
+            image_field=config.get("image_field", "jpg"),
+            caption_field=config.get("caption_field", "txt"),
+            target_size=config.get("image_size", 64),
+            buffer_size=config.get("buffer_size", 1000),
+            skip_failures=config.get("skip_failures", True),
+        )
+    elif stream:
         # Streaming dataset for very large datasets (LAION, etc.)
         return StreamingCaptionDataset(
             dataset_name=config.get("dataset_name"),
@@ -109,6 +121,19 @@ def get_train_val_datasets(
     import random
 
     stream = config.get("stream", False)
+    use_webdataset = config.get("use_webdataset", False)
+
+    if use_webdataset:
+        # WebDataset format (tar files) - streaming, no validation split
+        train_dataset = WebDatasetCaptionDataset(
+            dataset_name=config.get("dataset_name"),
+            image_field=config.get("image_field", "jpg"),
+            caption_field=config.get("caption_field", "txt"),
+            target_size=config.get("image_size", 64),
+            buffer_size=config.get("buffer_size", 1000),
+            skip_failures=config.get("skip_failures", True),
+        )
+        return train_dataset, None
 
     if stream:
         # Streaming datasets don't support splitting

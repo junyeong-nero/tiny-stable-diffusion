@@ -3,6 +3,7 @@
 Supports image-caption datasets from HuggingFace for training:
 - CaptionDataset: General HuggingFace datasets (Oxford Pets, MSCOCO, etc.)
 - StreamingCaptionDataset: Large streaming datasets (LAION, etc.)
+- WebDatasetCaptionDataset: WebDataset format (pixparse/cc3m-wds, etc.)
 """
 
 from __future__ import annotations
@@ -159,7 +160,8 @@ class CaptionDataset(Dataset):
                 value = sample.get(field)
                 if value is not None:
                     if isinstance(value, dict):
-                        caption = value.get("caption") or value.get("text")
+                        # Support various nested caption formats (COCO uses "raw")
+                        caption = value.get("raw") or value.get("caption") or value.get("text")
                     else:
                         caption = value
                     if caption is not None:
@@ -321,7 +323,8 @@ class StreamingCaptionDataset(IterableDataset):
                 value = sample.get(field)
                 if value is not None:
                     if isinstance(value, dict):
-                        caption = value.get("caption") or value.get("text")
+                        # Support various nested caption formats (COCO uses "raw")
+                        caption = value.get("raw") or value.get("caption") or value.get("text")
                     else:
                         caption = value
                     if caption is not None:
@@ -377,6 +380,125 @@ class StreamingCaptionDataset(IterableDataset):
 
     def __repr__(self) -> str:
         return f"StreamingCaptionDataset({self.dataset_name}, buffer_size={self.buffer_size})"
+
+
+class WebDatasetCaptionDataset(IterableDataset):
+    """WebDataset format streaming dataset for large image-caption datasets.
+
+    Uses webdataset library for efficient streaming from tar files.
+    Supports HuggingFace datasets in WebDataset format (e.g., pixparse/cc3m-wds).
+
+    Args:
+        dataset_name: HuggingFace dataset name or URL pattern
+        transform: Optional custom transform
+        image_field: Name of the image field (default: "jpg")
+        caption_field: Name of the caption field (default: "txt")
+        target_size: Target image size
+        buffer_size: Shuffle buffer size for randomization
+        skip_failures: Skip failed samples instead of raising errors
+    """
+
+    def __init__(
+        self,
+        dataset_name: str,
+        transform: Callable | None = None,
+        image_field: str = "jpg",
+        caption_field: str = "txt",
+        target_size: int = 64,
+        buffer_size: int = 1000,
+        skip_failures: bool = True,
+    ) -> None:
+        super().__init__()
+        self.dataset_name = dataset_name
+        self.image_field = image_field
+        self.caption_field = caption_field
+        self.target_size = target_size
+        self.buffer_size = buffer_size
+        self.skip_failures = skip_failures
+
+        if transform is None:
+            self.transform = transforms.Compose([
+                transforms.Resize((target_size, target_size), interpolation=transforms.InterpolationMode.BICUBIC),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+            ])
+        else:
+            self.transform = transform
+
+        # Build URL pattern for HuggingFace WebDataset
+        self._urls = self._build_urls(dataset_name)
+        print(f"WebDatasetCaptionDataset: {dataset_name}")
+        print(f"  URLs: {len(self._urls)} shards")
+
+    def _build_urls(self, dataset_name: str) -> list[str]:
+        """Build list of tar URLs from HuggingFace dataset."""
+        if dataset_name.startswith(("http://", "https://")):
+            return [dataset_name]
+
+        from huggingface_hub import HfFileSystem
+        fs = HfFileSystem()
+        files = fs.ls(f"datasets/{dataset_name}", detail=False)
+        tar_files = sorted([f for f in files if f.endswith(".tar")])
+
+        urls = [
+            f"https://huggingface.co/datasets/{dataset_name}/resolve/main/{f.split('/')[-1]}"
+            for f in tar_files
+        ]
+        return urls
+
+    def _process_sample(self, sample: dict) -> dict[str, torch.Tensor | str] | None:
+        """Process a single WebDataset sample."""
+        try:
+            image = sample.get(self.image_field)
+            if image is None:
+                return None
+
+            # WebDataset with decode('pil') returns PIL Image directly
+            if not isinstance(image, Image.Image):
+                if isinstance(image, bytes):
+                    image = Image.open(io.BytesIO(image))
+                else:
+                    return None
+
+            # Convert to RGB
+            if image.mode == "RGBA":
+                background = Image.new("RGB", image.size, (255, 255, 255))
+                background.paste(image, mask=image.split()[3])
+                image = background
+            elif image.mode != "RGB":
+                image = image.convert("RGB")
+
+            # Get caption
+            caption = sample.get(self.caption_field, "an image")
+            if isinstance(caption, bytes):
+                caption = caption.decode("utf-8")
+
+            if self.transform:
+                image = self.transform(image)
+
+            return {"image": image, "caption": str(caption)}
+        except Exception:
+            if self.skip_failures:
+                return None
+            raise
+
+    def __iter__(self):
+        import webdataset as wds
+
+        # Create WebDataset pipeline with shuffling
+        dataset = (
+            wds.WebDataset(self._urls, shardshuffle=True)
+            .shuffle(self.buffer_size)
+            .decode("pil")
+        )
+
+        for sample in dataset:
+            processed = self._process_sample(sample)
+            if processed is not None:
+                yield processed
+
+    def __repr__(self) -> str:
+        return f"WebDatasetCaptionDataset({self.dataset_name}, shards={len(self._urls)})"
 
 
 if __name__ == "__main__":

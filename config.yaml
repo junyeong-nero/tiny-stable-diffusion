@@ -73,16 +73,17 @@ diffusion_train:
   model_type: mmdit
 
   # ─── Dataset ───────────────────────────────────────────────────────────────
-  dataset_name: clip-benchmark/wds_mscoco_captions
+  # Conceptual Captions 3M (WebDataset format): ~3.3M image-caption pairs
+  dataset_name: pixparse/cc3m-wds
   image_field: jpg
   caption_field: txt
   split: train
-  stream: true
+  stream: true                       # Streaming for efficient loading
+  use_webdataset: true               # Use webdataset library for tar files
 
-  # Alternative: Oxford Pets dataset (cats & dogs)
-  # dataset_name: visual-layer/oxford-iiit-pet-vl-enriched
-  # image_field: image
-  # caption_field: caption_enriched
+  # Alternative datasets:
+  # - clip-benchmark/wds_mscoco_captions: ~590K (WebDataset, use_webdataset: false)
+  # - google-research-datasets/conceptual_captions: 3.3M (URL-based, slower)
 
   # ─── DataLoader ────────────────────────────────────────────────────────────
   num_workers: 4
@@ -149,11 +150,11 @@ diffusion_train:
   # ─── Validation ────────────────────────────────────────────────────────────
   val_split: 0.1                      # Fraction of data for validation (0.0-1.0)
   validation_prompts:
-    - a photo of a fluffy Persian cat
-    - a golden retriever sitting on grass
-    - a black and white Border Collie
-    - a cute tabby kitten playing
-    - a Siamese cat with blue eyes
+    - a cat sitting on a couch
+    - a dog running in a park
+    - a person riding a bicycle
+    - a bus on a city street
+    - a pizza on a wooden table
   validation_interval: 10             # Generate samples every N epochs
   sample_dir: samples                 # Directory for generated samples
 

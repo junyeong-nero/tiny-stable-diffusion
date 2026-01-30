@@ -53,6 +53,7 @@ dependencies = [
     "hf-transfer>=0.1.9",
     "streamlit>=1.30.0",
     "clip @ git+https://github.com/openai/CLIP.git",
+    "webdataset>=1.0.2",
 ]
 
 [project.optional-dependencies]
