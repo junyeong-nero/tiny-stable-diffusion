@@ -3,6 +3,7 @@
 > 이 문서는 tiny-stable-diffusion의 전체 아키텍처 개요를 설명합니다. 각 모델의 상세 구현은 다음 문서를 참조하세요:
 > - VAE 상세: [models/VAE.md](./models/VAE.md)
 > - MMDiT 상세: [models/MMDiT.md](./models/MMDiT.md)
+> - Diffusion 상세: [models/Diffusion.md](./models/Diffusion.md)
 
 ## 목차
 
@@ -48,8 +49,8 @@ tiny-stable-diffusion은 **Stable Diffusion 3**의 아키텍처를 따르는 교
 | 구성요소 | 역할 | 관련 문서 |
 |----------|------|-----------|
 | **VAE** | 이미지를 latent space로 압축/복원 | [models/VAE.md](./models/VAE.md) |
-| **Diffusion Transformer** | 노이즈 제거를 통한 이미지 생성 | `src/models/vanilla_dit.py` |
-| **MMDiT** | SD3 스타일의 Joint Attention 기반 생성 | [models/MMDiT.md](./models/MMDiT.md) |
+| **Diffusion** | Rectified Flow 기반 이미지 생성 | [models/Diffusion.md](./models/Diffusion.md) |
+| **MMDiT** | SD3 스타일의 Joint Attention 기반 Transformer | [models/MMDiT.md](./models/MMDiT.md) |
 | **CLIP Encoder** | 텍스트 프롬프트를 임베딩으로 변환 | `src/text_encoder/clip_encoder.py` |
 
 ---
@@ -61,8 +62,8 @@ tiny-stable-diffusion은 **Stable Diffusion 3**의 아키텍처를 따르는 교
 | 1. Image Input | RGB Image | - | `(B, 3, 64, 64)` |
 | 2. VAE Encode | Image | Latent | `(B, 3, 64, 64)` → `(B, 16, 8, 8)` |
 | 3. Add Noise | Clean Latent | Noisy Latent | `(B, 16, 8, 8)` → `(B, 16, 8, 8)` |
-| 4. DiT Predict | Noisy Latent + Text | Predicted Noise | `(B, 16, 8, 8)` → `(B, 16, 8, 8)` |
-| 5. Denoise | Predicted Noise | Clean Latent | `(B, 16, 8, 8)` → `(B, 16, 8, 8)` |
+| 4. DiT Predict | Noisy Latent + Text | Predicted Velocity | `(B, 16, 8, 8)` → `(B, 16, 8, 8)` |
+| 5. Denoise | Predicted Velocity | Clean Latent | `(B, 16, 8, 8)` → `(B, 16, 8, 8)` |
 | 6. VAE Decode | Clean Latent | Output Image | `(B, 16, 8, 8)` → `(B, 3, 64, 64)` |
 
 ---
@@ -78,22 +79,24 @@ tiny-stable-diffusion은 **Stable Diffusion 3**의 아키텍처를 따르는 교
 - **손실함수**: Reconstruction Loss + KL Divergence
 - **자세한 내용**: [models/VAE.md](./models/VAE.md)
 
-### 2. Diffusion Process
+### 2. Diffusion Process (Rectified Flow)
 
-노이즈 추가(Forward)와 제거(Reverse) 과정을 정의합니다.
+SD3에서 도입된 Rectified Flow 방식을 사용합니다. 이는 기존 DDPM보다 더 직선적인 노이즈 제거 경로를 학습합니다.
 
 | 요소 | 설명 |
 |------|------|
-| **Beta Schedule** | Cosine schedule (1000 timesteps) |
-| **Sampling** | DDPM (확률적) / DDIM (결정론적) |
+| **Method** | Rectified Flow |
+| **Noise Schedule** | Linear Schedule (Timestep 0 -> 1) |
+| **Prediction** | Velocity (v) Prediction |
+| **Sampling** | Euler ODE Solver |
 | **Conditioning** | Classifier-Free Guidance (CFG) |
 | **Loss Weighting** | Min-SNR Weighting |
 
-자세한 내용은 `src/models/diffusion.py`을 참조하세요.
+자세한 내용은 [models/Diffusion.md](./models/Diffusion.md)을 참조하세요.
 
 ### 3. Diffusion Transformer (DiT / MMDiT)
 
-Latent representation에서 노이즈를 예측하는 트랜스포머 모델입니다.
+Latent representation에서 노이즈(Velocity)를 예측하는 트랜스포머 모델입니다.
 
 | 모델 | 특징 | 파일 위치 |
 |------|------|-----------|
@@ -128,8 +131,6 @@ Latent representation에서 노이즈를 예측하는 트랜스포머 모델입�
 ## 참고 자료
 
 - [VAE Paper](https://arxiv.org/abs/1312.6114) - Auto-Encoding Variational Bayes
-- [DDPM Paper](https://arxiv.org/abs/2006.11239) - Denoising Diffusion Probabilistic Models
-- [DDIM Paper](https://arxiv.org/abs/2010.02502) - Denoising Diffusion Implicit Models
 - [DiT Paper](https://arxiv.org/abs/2212.09748) - Scalable Diffusion Models with Transformers
 - [SD3 Paper](https://arxiv.org/abs/2403.03206) - Scaling Rectified Flow Transformers
 - [CLIP Paper](https://arxiv.org/abs/2103.00020) - Learning Transferable Visual Models

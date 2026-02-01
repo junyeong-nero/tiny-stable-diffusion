@@ -189,7 +189,7 @@ def train_diffusion(config, use_wandb=False):
     1. Load & Freeze VAE
     2. Load CLIP text encoder
     3. Initialize DiT/MMDiT
-    4. Initialize Diffusion process
+    4. Initialize Diffusion process (Rectified Flow)
     5. Train for each epoch
     """
 ```
@@ -213,18 +213,20 @@ def train_diffusion(config, use_wandb=False):
        text_embeds = clip.encode(captions)  # (B, 512)
    ```
 
-4. **Random Timestep Sampling**:
+4. **Timestep Sampling** (Logit-Normal):
    ```python
-   t = torch.randint(0, 1000, (B,))  # uniform random
+   # Sample t ~ LogitNormal(0, 1), mapped to [0, 1000]
+   t = sigmoid(randn(B)) * 1000
    ```
+   *SD3 uses Logit-Normal sampling to focus training on middle timesteps.*
 
-5. **Add Noise** (Forward Diffusion):
+5. **Add Noise** (Forward Process - Linear Interpolation):
    ```python
    noise = torch.randn_like(latents)
-   noisy_latents = √(ᾱ_t) × latents + √(1-ᾱ_t) × noise
+   # x_t = (1 - t) * x_0 + t * noise
+   noisy_latents = (1 - t) * latents + t * noise
    ```
-   - Large t: noise dominates
-   - Small t: latent dominates
+   *Rectified Flow uses a straight path from data to noise.*
 
 6. **CFG Dropout** (During training):
    ```python
@@ -232,18 +234,21 @@ def train_diffusion(config, use_wandb=False):
        if random() < cfg_probability:  # e.g., 10%
            text_embeds[i] = uncond_embed  # empty string ""
    ```
-   This enables the model to learn unconditional generation for CFG during inference.
 
-7. **Noise Prediction**:
+7. **Velocity Prediction**:
    ```python
-   predicted_noise = dit(noisy_latents, t, text_embeds)  # (B, 16, 8, 8)
+   # Target velocity v = noise - latents
+   v_pred = model(noisy_latents, t, text_embeds)  # (B, 16, 8, 8)
    ```
 
 8. **Loss Computation** (Min-SNR weighted MSE):
    ```python
-   mse = mean((predicted_noise - noise)², dim=[1,2,3])  # Per-sample: (B,)
-   snr = ᾱ_t / (1 - ᾱ_t)
+   mse = mean((v_pred - v_target)², dim=[1,2,3])
+   
+   # SNR = (1-t)² / t²
+   snr = ((1-t)**2) / (t**2)
    weight = min(snr, γ) / snr  # γ=5.0
+   
    loss = mean(mse × weight)
    ```
 
@@ -290,13 +295,8 @@ def generate_samples(model, diffusion, clip_encoder, vae_decoder, prompts, ...):
 
     Every N epochs:
     1. Use fixed validation prompts
-    2. Generate images with DDIM sampling
+    2. Generate images with Euler ODE sampling
     3. Save images (samples/epoch_N/)
-
-    Purpose:
-    - Visual confirmation of training progress
-    - Check text-image alignment
-    - Detect overfitting/mode collapse
     """
 ```
 

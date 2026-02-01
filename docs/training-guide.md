@@ -289,8 +289,10 @@ seed: 42
 
 ## Additional Documentation
 
-- [Architecture Deep Dive](./architecture.md) - Model architecture details
-- [Training Pipeline Deep Dive](./training-pipeline.md) - Training process details
+- [Architecture Deep Dive](./architecture.md) - Overall system architecture
+- [VAE Documentation](./models/VAE.md) - VAE details
+- [MMDiT Documentation](./models/MMDiT.md) - Transformer details
+- [Diffusion Documentation](./models/Diffusion.md) - Rectified Flow details
 - [Inference Deep Dive](./inference.md) - Image generation details
 
 ---

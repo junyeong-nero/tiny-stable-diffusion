@@ -4,6 +4,28 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange) ![License](https://img.shields.io/badge/License-MIT-green)
 
+## ⚡ TL;DR
+
+A **200M parameter** implementation of Stable Diffusion 3 (SD3) trained on consumer GPUs.
+It uses **Rectified Flow** and **MMDiT** architecture to generate **64×64 images**.
+
+**Quick Start:**
+```bash
+# 1. Setup
+bash setup.sh
+
+# 2. Train VAE (or download weights)
+uv run main.py --train-vae
+
+# 3. Train Diffusion
+uv run main.py --train-diffusion
+
+# 4. Generate
+uv run main.py --generate --prompt "a cute cat"
+```
+
+---
+
 ## Introduction
 
 A lightweight, educational implementation of **Stable Diffusion 3** built from scratch in PyTorch. This project is designed to help you understand how modern text-to-image diffusion models work by providing a minimal yet complete implementation.
@@ -12,28 +34,50 @@ A lightweight, educational implementation of **Stable Diffusion 3** built from s
 
 - **64×64 Resolution**: Optimized for fast training and experimentation on consumer GPUs
 - **SD3 Architecture**: Implements the core components of Stable Diffusion 3
-  - AutoencoderKL (VAE) for latent space compression
-  - MMDiT (Multi-Modal Diffusion Transformer) for text-conditioned generation
-  - CLIP text encoder for prompt understanding
+  - **VAE**: AutoencoderKL with f8 compression (16 latent channels)
+  - **MMDiT**: Multi-Modal Diffusion Transformer with Joint Attention
+  - **Rectified Flow**: Linear interpolation based diffusion training
 - **Two-Stage Training**: Train VAE first, then diffusion model in latent space
 - **Beginner-Friendly**: Clean, readable code with minimal dependencies
 
-### Example Generation
+---
 
-> **Prompt**: "a Siamese cat with blue eyes"
+## Overall Pipeline
 
-<p align="center">
-  <img src="assets/sample_0.png" alt="Sample 0" width="128">
-  <img src="assets/sample_1.png" alt="Sample 1" width="128">
-  <img src="assets/sample_2.png" alt="Sample 2" width="128">
-  <img src="assets/sample_3.png" alt="Sample 3" width="128">
-</p>
+The system works in two distinct stages, mirroring the standard Latent Diffusion Model (LDM) approach but with SD3 improvements.
 
-> ⚠️ **Note**: The current model is trained on [Oxford Pets dataset](https://huggingface.co/datasets/visual-layer/oxford-iiit-pet-vl-enriched) (7.4K images of cats & dogs). It works best with **pet-related prompts**.
+### 1. Training Pipeline
+
+```mermaid
+graph LR
+    subgraph Stage 1: VAE
+    I[Image 64px] --> E[Encoder]
+    E --> L[Latent 8x8x16]
+    L --> D[Decoder]
+    D --> R[Recon Image]
+    end
+    
+    subgraph Stage 2: Diffusion
+    T[Text "a cat"] --> CLIP[CLIP Encoder]
+    CLIP --> Emb[Text Embeds]
+    L2[Latent] --> Noise[Add Noise]
+    Noise --> MMDiT
+    Emb --> MMDiT
+    MMDiT --> Pred[Predict Velocity]
+    end
+```
+
+### 2. Inference Pipeline
+
+```
+Prompt "a cat" ──► CLIP ──► Text Embeds ──┐
+                                          ▼
+Random Noise ──► MMDiT (Rectified Flow) ──► Denoised Latent ──► VAE Decoder ──► Image
+```
 
 ---
 
-## How to Use
+## Usage
 
 ### 1. Environment Setup
 
@@ -81,34 +125,27 @@ uv run streamlit run src/demo/app.py
 
 ---
 
-## How It Works
-
-```
-Training Pipeline:
-1. VAE: Learn to compress images (64×64 → 8×8 latent)
-2. Diffusion: Learn to generate images from text in latent space
-
-Generation:
-Text Prompt → CLIP → DiT Denoising → VAE Decode → Image
-```
-
----
-
-## Model Architecture
+## Model Architecture Details
 
 | Component | Parameters | Description |
 |-----------|------------|-------------|
-| VAE | ~21M | Image encoder/decoder (f8 compression) |
-| MMDiT-B | ~187M | Text-conditioned diffusion transformer |
-| CLIP | - | Text encoder (pretrained, frozen) |
+| **VAE** | ~21M | **AutoencoderKL**: Compresses 64×64 images to 8×8×16 latents. Uses a "f8" compression factor. |
+| **MMDiT** | ~187M (Base) | **Multi-Modal DiT**: Uses Joint Attention to process text and image tokens simultaneously. |
+| **CLIP** | 123M | **Text Encoder**: Frozen CLIP ViT-B/32 model for text embeddings. |
 
 **Comparison with SD3:**
 
-| | Stable Diffusion 3 | tiny-stable-diffusion |
+| Feature | Stable Diffusion 3 | tiny-stable-diffusion |
 |---|---|---|
-| Resolution | 1024×1024 | 64×64 |
-| Parameters | 2B+ | ~200M |
-| Training | 1000s GPU-hours | A few hours |
+| **Resolution** | 1024×1024 | 64×64 |
+| **Latent Channels** | 16 | 16 |
+| **Model Size** | 2B+ | ~200M |
+| **Training Cost** | Massive Cluster | Consumer GPU |
+
+For detailed documentation, check the `docs/` folder:
+- [**VAE Architecture**](docs/models/VAE.md)
+- [**MMDiT Architecture**](docs/models/MMDiT.md)
+- [**Diffusion Process**](docs/models/Diffusion.md)
 
 ---
 
@@ -133,24 +170,6 @@ diffusion_train:
 
 ---
 
-## CLI Commands
-
-```bash
-# Training
-uv run main.py --train-vae              # Train VAE
-uv run main.py --train-diffusion        # Train Diffusion
-
-# Generation
-uv run main.py --generate --prompt "..."
-uv run main.py --generate --prompt "..." --steps 100 --guidance 7.5
-
-# Demo
-uv run main.py --demo                   # CLI demo
-uv run streamlit run src/demo/app.py    # Web UI
-```
-
----
-
 ## Project Structure
 
 ```
@@ -163,6 +182,7 @@ tiny-stable-diffusion/
 │   ├── inference/       # Generation
 │   └── demo/            # Streamlit app
 ├── checkpoints/         # Saved models
+├── docs/                # Documentation
 └── samples/             # Generated images
 ```
 
