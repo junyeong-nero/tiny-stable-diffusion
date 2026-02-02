@@ -51,14 +51,24 @@ uv run main.py --train-diffusion --epochs 200 --batch-size 32
 uv run main.py --train-diffusion --vae-checkpoint checkpoints/vae.pt --epochs 200
 ```
 
-### 4. Image Generation
+### 4. Stage 3: Motion Module Training (Optional GIF Extension)
+
+```bash
+# Basic Motion training (requires VAE and Diffusion)
+uv run main.py --train-motion --epochs 100 --batch-size 8
+
+# With memory optimizations (gradient checkpointing)
+uv run main.py --train-motion --epochs 100 --batch-size 2 --gradient-checkpointing
+```
+
+### 5. Image & GIF Generation
 
 ```bash
 # Generate single image
 uv run main.py --generate --prompt "a cute cat"
 
-# Generate multiple images
-uv run main.py --generate --prompt "a robot,a sunset,a mountain" --num-samples 4
+# Generate GIF animation
+uv run main.py --generate-gif --prompt "a cat walking" --frames 16 --fps 8
 
 # With options
 uv run main.py --generate \
@@ -68,14 +78,13 @@ uv run main.py --generate \
     --seed 42
 ```
 
-### 5. Upload to HuggingFace Hub
+### 6. Upload to HuggingFace Hub
 
 ```bash
-# Upload after VAE training
+# Upload after training
 uv run main.py --train-vae --push-to-hub --hub-model-id username/my-vae
-
-# Upload after Diffusion training
 uv run main.py --train-diffusion --push-to-hub --hub-model-id username/my-diffusion
+uv run main.py --train-motion --push-to-hub --hub-model-id username/my-motion
 ```
 
 ---
@@ -86,41 +95,23 @@ uv run main.py --train-diffusion --push-to-hub --hub-model-id username/my-diffus
 
 ```yaml
 # Current training stage
-training_stage: vae_train  # or diffusion_train
+training_stage: vae_train  # vae_train, diffusion_train, or motion_train
 
 # VAE training settings
 vae_train:
-    data_source: streaming_caption
-    dataset_name: hmu013/LAION-300k
-    image_size: 64
-    latent_channels: 16
-    epochs: 100
-    batch_size: 128
-    learning_rate: 4.0e-4
-    kl_weight: 1.0e-6
-    checkpoint_path: checkpoints/vae.pt
+    ...
 
 # Diffusion training settings
 diffusion_train:
-    model_type: mmdit  # dit or mmdit
-    model_size: S      # S, B, L, XL
-    epochs: 200
-    batch_size: 32
+    ...
+
+# Motion Module training settings
+motion_train:
+    base_checkpoint: checkpoints/diffusion.pt
+    motion_num_layers: 2
+    num_frames: 16
+    batch_size: 8
     learning_rate: 1.0e-4
-    guidance_scale: 7.5
-    use_ema: true
-    ema_decay: 0.9999
-    vae_checkpoint: checkpoints/vae.pt
-    checkpoint_path: checkpoints/diffusion.pt
-```
-
-### CLI Priority
-
-CLI arguments override config.yaml values:
-
-```bash
-# Even if epochs=100 in config.yaml, CLI takes priority
-uv run main.py --train-vae --epochs 50
 ```
 
 ---
@@ -128,33 +119,19 @@ uv run main.py --train-vae --epochs 50
 ## Hyperparameters
 
 ### VAE Training
+...
+
+### Diffusion Training
+...
+
+### Motion Module Training
 
 | Parameter | Default | Recommended Range | Description |
 |-----------|---------|-------------------|-------------|
 | `epochs` | 100 | 50-200 | Number of training epochs |
-| `batch_size` | 128 | 32-256 | Batch size |
-| `learning_rate` | 4e-4 | 1e-4 ~ 1e-3 | Learning rate |
-| `kl_weight` | 1e-6 | 1e-7 ~ 1e-5 | KL loss weight |
-
-### Diffusion Training
-
-| Parameter | Default | Recommended Range | Description |
-|-----------|---------|-------------------|-------------|
-| `epochs` | 200 | 100-500 | Number of training epochs |
-| `batch_size` | 32 | 16-64 | Batch size |
-| `learning_rate` | 1e-4 | 5e-5 ~ 3e-4 | Learning rate |
-| `guidance_scale` | 7.5 | 3.0-15.0 | CFG scale |
-| `cfg_probability` | 0.1 | 0.05-0.2 | CFG dropout probability |
-| `ema_decay` | 0.9999 | 0.999-0.9999 | EMA decay rate |
-
-### Model Sizes
-
-| Size | Layers | Hidden | Heads | Params | VRAM |
-|------|--------|--------|-------|--------|------|
-| **S** | 12 | 384 | 6 | ~40M | ~4GB |
-| B | 12 | 768 | 12 | ~160M | ~8GB |
-| L | 24 | 1024 | 16 | ~560M | ~16GB |
-| XL | 28 | 1152 | 16 | ~820M | ~24GB |
+| `batch_size` | 8 | 2-16 | Batch size (smaller than image due to VRAM) |
+| `learning_rate` | 1e-4 | 5e-5 ~ 2e-4 | Learning rate |
+| `num_frames` | 16 | 8-32 | Number of frames in a video clip |
 
 ---
 
@@ -164,11 +141,10 @@ uv run main.py --train-vae --epochs 50
 
 | Stage | Model Size | Batch Size | VRAM |
 |-------|------------|------------|------|
-| VAE | - | 32 | ~4GB |
 | VAE | - | 128 | ~8GB |
-| Diffusion | S | 32 | ~6GB |
 | Diffusion | B | 32 | ~12GB |
-| Diffusion | L | 16 | ~20GB |
+| Motion (16 frames)| B | 4 | ~16GB |
+| Motion (16 frames)| B | 1 (w/ Grad CKPT) | ~8GB |
 
 ### Recommended Specifications
 

@@ -15,7 +15,7 @@
 
 ## 전체 시스템 개요
 
-tiny-stable-diffusion은 **Stable Diffusion 3**의 아키텍처를 따르는 교육용 구현체입니다. 두 단계로 구성된 파이프라인으로, 효율적인 latent space diffusion을 실현합니다.
+tiny-stable-diffusion은 **Stable Diffusion 3**의 아키텍처를 따르는 교육용 구현체입니다. 세 단계로 구성된 파이프라인으로, 이미지 생성부터 애니메이션(GIF) 생성까지 지원합니다.
 
 ### 아키텍처 다이어그램
 
@@ -25,14 +25,14 @@ tiny-stable-diffusion은 **Stable Diffusion 3**의 아키텍처를 따르는 교
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                 │
 │  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐   │
-│  │    Image    │────▶│     VAE     │────▶│  Diffusion  │────▶│   Output    │   │
-│  │   (64×64)   │     │   Encoder   │     │  Transformer│     │   Image     │   │
+│  │    Image/   │────▶│     VAE     │────▶│  Diffusion  │────▶│   Output    │   │
+│  │    Video    │     │   Encoder   │     │  Transformer│     │  Image/GIF  │   │
 │  └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘   │
 │         │                   │                   ▲                   ▲           │
 │         │                   ▼                   │                   │           │
 │         │            ┌─────────────┐     ┌─────────────┐     ┌─────────────┐   │
 │         │            │   Latent    │     │    Text     │     │     VAE     │   │
-│         │            │  (8×8×16)   │     │  Encoder    │     │   Decoder   │   │
+│         │            │  (F×16×8×8) │     │  Encoder    │     │   Decoder   │   │
 │         │            └─────────────┘     │   (CLIP)    │     └─────────────┘   │
 │         │                                └─────────────┘                       │
 │         │                                       ▲                               │
@@ -48,23 +48,21 @@ tiny-stable-diffusion은 **Stable Diffusion 3**의 아키텍처를 따르는 교
 
 | 구성요소 | 역할 | 관련 문서 |
 |----------|------|-----------|
-| **VAE** | 이미지를 latent space로 압축/복원 | [models/VAE.md](./models/VAE.md) |
-| **Diffusion** | Rectified Flow 기반 이미지 생성 | [models/Diffusion.md](./models/Diffusion.md) |
+| **VAE** | 이미지/프레임을 latent space로 압축/복원 | [models/VAE.md](./models/VAE.md) |
+| **Diffusion** | Rectified Flow 기반 노이즈 제거 | [models/Diffusion.md](./models/Diffusion.md) |
 | **MMDiT** | SD3 스타일의 Joint Attention 기반 Transformer | [models/MMDiT.md](./models/MMDiT.md) |
+| **Motion Module** | 애니메이션 생성을 위한 Temporal Attention 레이어 | [extensions/MotionModule.md](./extensions/MotionModule.md) |
 | **CLIP Encoder** | 텍스트 프롬프트를 임베딩으로 변환 | `src/text_encoder/clip_encoder.py` |
 
 ---
 
 ## 데이터 흐름
 
-| 단계 | 입력 | 출력 | 차원 변화 |
-|------|------|------|-----------|
-| 1. Image Input | RGB Image | - | `(B, 3, 64, 64)` |
-| 2. VAE Encode | Image | Latent | `(B, 3, 64, 64)` → `(B, 16, 8, 8)` |
-| 3. Add Noise | Clean Latent | Noisy Latent | `(B, 16, 8, 8)` → `(B, 16, 8, 8)` |
-| 4. DiT Predict | Noisy Latent + Text | Predicted Velocity | `(B, 16, 8, 8)` → `(B, 16, 8, 8)` |
-| 5. Denoise | Predicted Velocity | Clean Latent | `(B, 16, 8, 8)` → `(B, 16, 8, 8)` |
-| 6. VAE Decode | Clean Latent | Output Image | `(B, 16, 8, 8)` → `(B, 3, 64, 64)` |
+### 1. 이미지 생성 (Image Generation)
+- `(B, 3, 64, 64)` → VAE → `(B, 16, 8, 8)` → MMDiT → Denoise → VAE → `(B, 3, 64, 64)`
+
+### 2. 애니메이션 생성 (GIF Generation)
+- `(B, F, 3, 64, 64)` → VAE (frame-wise) → `(B, F, 16, 8, 8)` → Animated MMDiT (Temporal Attention) → Denoise → VAE → `(B, F, 3, 64, 64)`
 
 ---
 
@@ -72,16 +70,15 @@ tiny-stable-diffusion은 **Stable Diffusion 3**의 아키텍처를 따르는 교
 
 ### 1. VAE (Variational AutoEncoder)
 
-이미지를 저차원 잠재 공간(latent space)으로 압축하고 복원합니다.
+이미지를 저차원 잠재 공간(latent space)으로 압축하고 복원합니다. GIF 생성 시 각 프레임을 독립적으로 처리합니다.
 
 - **압축률**: 64×64×3 = 12,288 → 8×8×16 = **1,024** (12배 효율적)
 - **구조**: Encoder + Decoder (ResNet + Self-Attention)
-- **손실함수**: Reconstruction Loss + KL Divergence
 - **자세한 내용**: [models/VAE.md](./models/VAE.md)
 
 ### 2. Diffusion Process (Rectified Flow)
 
-SD3에서 도입된 Rectified Flow 방식을 사용합니다. 이는 기존 DDPM보다 더 직선적인 노이즈 제거 경로를 학습합니다.
+SD3에서 도입된 Rectified Flow 방식을 사용합니다. 애니메이션 생성 시 시간 축(Frame)을 포함한 Latent Tensor에 대해 작동합니다.
 
 | 요소 | 설명 |
 |------|------|
@@ -89,10 +86,6 @@ SD3에서 도입된 Rectified Flow 방식을 사용합니다. 이는 기존 DDPM
 | **Noise Schedule** | Linear Schedule (Timestep 0 -> 1) |
 | **Prediction** | Velocity (v) Prediction |
 | **Sampling** | Euler ODE Solver |
-| **Conditioning** | Classifier-Free Guidance (CFG) |
-| **Loss Weighting** | Min-SNR Weighting |
-
-자세한 내용은 [models/Diffusion.md](./models/Diffusion.md)을 참조하세요.
 
 ### 3. Diffusion Transformer (DiT / MMDiT)
 
@@ -100,20 +93,26 @@ Latent representation에서 노이즈(Velocity)를 예측하는 트랜스포머 
 
 | 모델 | 특징 | 파일 위치 |
 |------|------|-----------|
-| **Vanilla DiT** | Cross-Attention 기반 text conditioning | `src/models/vanilla_dit.py` |
 | **MMDiT** | Joint Attention, 양방향 text-image 상호작용 | [models/MMDiT.md](./models/MMDiT.md) |
+| **Animated MMDiT** | MMDiT + Temporal Attention Layers | `src/models/animated_mmdit.py` |
 
-**모델 크기별 파라미터:**
-- S: ~40M / B: ~160M / L: ~560M / XL: ~820M
+### 4. Motion Module (GIF Generation)
 
-### 4. Text Encoder (CLIP)
+기존 이미지 생성 모델을 확장하여 시간적 일관성을 가진 애니메이션을 생성하는 모듈입니다.
 
-텍스트 프롬프트를 embedding으로 변환합니다.
+```
+┌──────────────────────────────────────────────────────┐
+│  MMDiT/DiT (frozen) + Motion Module (trainable)      │
+│  ┌─────────────────┐  ┌───────────────────────────┐  │
+│  │ Spatial Attn    │→ │ Temporal Attn (NEW)       │  │
+│  │ (기존, frozen)   │  │ (frames 간 attention)     │  │
+│  └─────────────────┘  └───────────────────────────┘  │
+└──────────────────────────────────────────────────────┘
+```
 
-- **모델**: CLIP ViT-B/32
-- **임베딩 차원**: 512
-- **토큰 길이**: 77 tokens (BPE)
-- **파일 위치**: `src/text_encoder/clip_encoder.py`
+- **구조**: Temporal Attention Layer를 기존 Spatial Attention 뒤에 삽입하여 프레임 간의 움직임을 학습합니다.
+- **학습**: 기존 MMDiT 가중치는 고정(freeze)하고 Motion Module만 비디오 데이터로 학습합니다.
+- **상세 내용**: [extensions/MotionModule.md](./extensions/MotionModule.md)
 
 ---
 
