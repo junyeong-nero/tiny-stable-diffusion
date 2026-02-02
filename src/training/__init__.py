@@ -8,6 +8,7 @@ from src.training.checkpoint import (
 from src.training.ema import EMA
 from src.training.trainer import generate_samples, train_diffusion, train_one_epoch
 from src.training.vae_trainer import train_vae
+from src.training.motion_trainer import train_motion, MotionTrainConfig
 from src.training.wandb_logger import WandbLogger
 
 __all__ = [
@@ -15,6 +16,8 @@ __all__ = [
     "WandbLogger",
     "train_diffusion",
     "train_vae",
+    "train_motion",
+    "MotionTrainConfig",
     "train_one_epoch",
     "generate_samples",
     "save_checkpoint",
