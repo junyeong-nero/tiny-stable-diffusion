@@ -161,6 +161,85 @@ diffusion_train:
 # ┌───────────────────────────────────────────────────────────────────────────┐
 # │                         HuggingFace Hub Settings                          │
 # └───────────────────────────────────────────────────────────────────────────┘
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │                       Stage 3: Motion Module Training                     │
+# │                    AnimateDiff-style Video/GIF Generation                 │
+# └───────────────────────────────────────────────────────────────────────────┘
+motion_train:
+  # ─── Model Checkpoints ─────────────────────────────────────────────────────
+  vae_checkpoint: checkpoints/vae.pt
+  base_checkpoint: checkpoints/diffusion.pt
+
+  # ─── Motion Module Architecture ────────────────────────────────────────────
+  motion_num_layers: 2                # Temporal transformer layers
+  motion_num_heads: 8                 # Attention heads
+  num_frames: 16                      # Frames per video clip
+
+  # ─── Dataset ───────────────────────────────────────────────────────────────
+  use_synthetic_data: true            # Use synthetic data for testing
+  synthetic_size: 1000                # Number of synthetic videos
+  synthetic_pattern: moving_circle    # Pattern: moving_circle, gradient, noise
+
+  # For real video data (set use_synthetic_data: false):
+  # dataset_name: sayakpaul/ucf101-subset
+  # video_field: video
+  # caption_field: label
+
+  # ─── Image/Latent Settings ─────────────────────────────────────────────────
+  image_size: 64
+  latent_size: 8
+  latent_channels: 16
+  scaling_factor: 0.4869
+
+  # ─── Training Hyperparameters ──────────────────────────────────────────────
+  epochs: 100
+  batch_size: 4                       # Smaller due to video memory
+  learning_rate: 1.0e-4
+  gradient_accumulation: 4            # Effective batch = 16
+  max_grad_norm: 1.0
+
+  # ─── DataLoader ────────────────────────────────────────────────────────────
+  num_workers: 4
+  prefetch_factor: 2
+
+  # ─── Diffusion Settings ────────────────────────────────────────────────────
+  num_timesteps: 1000
+  guidance_scale: 7.5
+  min_snr_gamma: 5.0
+  temporal_consistency_weight: 0.0    # Extra loss for smooth motion
+
+  # ─── CFG Settings ──────────────────────────────────────────────────────────
+  initial_cfg_prob: 0.0
+  final_cfg_prob: 0.1
+  cfg_warmup_epochs: 10
+
+  # ─── EMA ────────────────────────────────────────────────────────────────────
+  use_ema: true
+  ema_decay: 0.9999
+
+  # ─── Training Settings ─────────────────────────────────────────────────────
+  mixed_precision: false                # Enable AMP (Automatic Mixed Precision)
+  gradient_checkpointing: false         # Trade compute for memory savings
+  device: auto
+  seed: 42
+
+  # ─── Checkpoint ────────────────────────────────────────────────────────────
+  checkpoint_path: checkpoints/motion.pt
+  checkpoint_dir: checkpoints
+  checkpoint_interval: 10
+  resume: false
+
+  # ─── Validation ────────────────────────────────────────────────────────────
+  validation_prompts:
+    - a moving circle animation
+    - an animated shape
+    - a simple motion
+  validation_interval: 10
+  sample_dir: samples/motion
+
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │                         HuggingFace Hub Settings                          │
+# └───────────────────────────────────────────────────────────────────────────┘
 hub:
   push_to_hub: false                  # Push to HF Hub after training
   model_id: null                      # Repository ID (e.g., "username/tiny-sd-vae")

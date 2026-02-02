@@ -32,11 +32,14 @@ def main() -> None:
     # Mode arguments
     parser.add_argument("--train-vae", action="store_true", help="Stage 1: Train VAE (encoder + decoder)")
     parser.add_argument("--train-diffusion", action="store_true", help="Stage 2: Train Diffusion on latent space")
+    parser.add_argument("--train-motion", action="store_true", help="Stage 3: Train Motion Module for animation")
     parser.add_argument("--train", action="store_true", help="Train using config.yaml settings")
     parser.add_argument("--generate", action="store_true", help="Generate images from prompts")
+    parser.add_argument("--generate-gif", action="store_true", help="Generate animated GIFs from prompts")
     parser.add_argument("--reconstruct-vae", action="store_true", help="Reconstruct image through VAE")
     parser.add_argument("--decode-random", action="store_true", help="Generate images from random latent vectors (VAE decoder only)")
     parser.add_argument("--demo", action="store_true", help="Run interactive demo")
+    parser.add_argument("--animation-demo", action="store_true", help="Run interactive animation demo")
 
     # Training arguments
     parser.add_argument("--resume", action="store_true", help="Resume training from checkpoint")
@@ -61,6 +64,11 @@ def main() -> None:
     parser.add_argument("--latent-scale", type=float, default=1.0, help="Scale for random latent vectors")
     parser.add_argument("--reference-dir", type=str, default=None, help="Reference images dir for latent statistics")
 
+    # Animation arguments
+    parser.add_argument("--num-frames", type=int, default=16, help="Number of frames for GIF generation")
+    parser.add_argument("--fps", type=int, default=8, help="Frames per second for GIF")
+    parser.add_argument("--motion-checkpoint", type=str, default=None, help="Path to motion module checkpoint")
+
     # Wandb arguments
     parser.add_argument("--wandb", action="store_true", help="Enable wandb logging")
     parser.add_argument("--wandb-project", type=str, default="tiny-stable-diffusion", help="Wandb project")
@@ -79,15 +87,23 @@ def main() -> None:
     elif args.train_diffusion:
         _run_diffusion_training(args)
 
+    elif args.train_motion:
+        _run_motion_training(args)
+
     elif args.train:
         stage = get_training_stage()
         if stage == "vae_train":
             _run_vae_training(args)
+        elif stage == "motion_train":
+            _run_motion_training(args)
         else:
             _run_diffusion_training(args)
 
     elif args.generate:
         _run_generation(args)
+
+    elif args.generate_gif:
+        _run_gif_generation(args)
 
     elif args.reconstruct_vae:
         _run_vae_reconstruction(args)
@@ -97,6 +113,9 @@ def main() -> None:
 
     elif args.demo:
         _run_demo(args)
+
+    elif args.animation_demo:
+        _run_animation_demo(args)
 
     else:
         parser.print_help()
@@ -290,6 +309,124 @@ def _run_demo(args: argparse.Namespace) -> None:
     demo(
         checkpoint=args.checkpoint,
         vae_checkpoint=args.vae_checkpoint,
+    )
+
+
+def _run_motion_training(args: argparse.Namespace) -> None:
+    """Run Motion Module training (Stage 3)."""
+    from src.training.motion_trainer import train_motion
+
+    config = get_config("motion_train")
+
+    # Override with CLI args
+    if args.dataset is not None:
+        config["dataset_name"] = args.dataset
+
+    if args.vae_checkpoint is not None:
+        config["vae_checkpoint"] = args.vae_checkpoint
+
+    if args.checkpoint is not None:
+        config["base_checkpoint"] = args.checkpoint
+
+    if args.epochs is not None:
+        config["epochs"] = args.epochs
+    if args.batch_size is not None:
+        config["batch_size"] = args.batch_size
+    if args.learning_rate is not None:
+        config["learning_rate"] = args.learning_rate
+
+    config["wandb_project"] = args.wandb_project
+    config["wandb_run_name"] = args.wandb_run_name or "motion-training"
+
+    if args.resume:
+        config["resume"] = True
+
+    train_motion(config, use_wandb=args.wandb)
+
+    # Push to HuggingFace Hub if requested
+    if args.push_to_hub:
+        _push_model_to_hub(
+            checkpoint_path=config["checkpoint_path"],
+            model_type="motion",
+            hub_model_id=args.hub_model_id,
+            private=args.hub_private,
+            config=config,
+        )
+
+
+def _run_gif_generation(args: argparse.Namespace) -> None:
+    """Run GIF generation."""
+    from src.inference.animation_generator import AnimationGenerator
+
+    if args.prompt is None:
+        print("Error: --prompt required for --generate-gif")
+        return
+
+    # Find checkpoints
+    vae_checkpoint = args.vae_checkpoint or "checkpoints/vae.pt"
+    diffusion_checkpoint = args.checkpoint
+
+    if diffusion_checkpoint is None:
+        from src.training.checkpoint import find_latest_checkpoint
+
+        diffusion_checkpoint = find_latest_checkpoint("checkpoints", prefix="diffusion")
+        if diffusion_checkpoint is None:
+            diffusion_checkpoint = "checkpoints/diffusion.pt"
+
+    motion_checkpoint = args.motion_checkpoint
+    if motion_checkpoint is None:
+        from src.training.checkpoint import find_latest_checkpoint
+
+        motion_checkpoint = find_latest_checkpoint("checkpoints", prefix="motion")
+
+    # Check checkpoints exist
+    if not Path(vae_checkpoint).exists():
+        print(f"Error: VAE checkpoint not found: {vae_checkpoint}")
+        return
+    if not Path(diffusion_checkpoint).exists():
+        print(f"Error: Diffusion checkpoint not found: {diffusion_checkpoint}")
+        return
+
+    # Create generator
+    generator = AnimationGenerator(
+        vae_checkpoint=vae_checkpoint,
+        diffusion_checkpoint=diffusion_checkpoint,
+        motion_checkpoint=motion_checkpoint,
+        num_frames=args.num_frames,
+    )
+
+    # Generate for each prompt
+    prompts = [p.strip() for p in args.prompt.split(",")]
+
+    for i, prompt in enumerate(prompts):
+        if len(prompts) > 1 or args.num_samples > 1:
+            output_path = f"output_{i}.gif"
+        else:
+            output_path = args.output.replace(".png", ".gif")
+            if not output_path.endswith(".gif"):
+                output_path = output_path + ".gif"
+
+        generator.generate_and_save(
+            prompt=prompt,
+            output_path=output_path,
+            num_frames=args.num_frames,
+            num_steps=args.steps,
+            guidance_scale=args.guidance,
+            seed=args.seed,
+            fps=args.fps,
+        )
+
+        print(f"Saved: {output_path}")
+
+
+def _run_animation_demo(args: argparse.Namespace) -> None:
+    """Run interactive animation demo."""
+    from src.inference.animation_generator import animation_demo
+
+    animation_demo(
+        vae_checkpoint=args.vae_checkpoint,
+        diffusion_checkpoint=args.checkpoint,
+        motion_checkpoint=args.motion_checkpoint,
     )
 
 
