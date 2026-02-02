@@ -36,7 +36,7 @@ def push_to_hub(
     Args:
         checkpoint_path: Path to the checkpoint file (.pt)
         repo_id: HuggingFace repository ID (e.g., "username/model-name")
-        model_type: Type of model - "vae" or "diffusion"
+        model_type: Type of model - "vae", "diffusion", or "motion"
         config: Training configuration to save alongside the model
         token: HuggingFace API token (uses HF_TOKEN env var if not provided)
         private: Whether to create a private repository
@@ -144,13 +144,23 @@ def _create_model_card(
     """Create a model card for the uploaded model."""
     model_name = repo_id.split("/")[-1] if "/" in repo_id else repo_id
 
+    # Set tags based on model type
+    if model_type == "motion":
+        tags = """  - tiny-stable-diffusion
+  - motion-module
+  - video-generation
+  - gif-generation
+  - animatediff"""
+    else:
+        tags = f"""  - tiny-stable-diffusion
+  - {model_type}
+  - image-generation
+  - diffusion"""
+
     card = f"""---
 license: mit
 tags:
-  - tiny-stable-diffusion
-  - {model_type}
-  - image-generation
-  - diffusion
+{tags}
 library_name: pytorch
 ---
 
@@ -171,6 +181,22 @@ The VAE follows the SD3 architecture with 16 latent channels and f8 compression 
 - **Latent Channels**: 16
 - **Compression**: f8 (64x64 → 8x8)
 """
+    elif model_type == "motion":
+        card += """This is a Motion Module trained for video/GIF generation using the AnimateDiff approach.
+The Motion Module adds temporal coherence to a frozen base diffusion model, enabling animation generation from text prompts.
+
+### Architecture
+- **Type**: Motion Module (Temporal Transformer)
+- **Design**: AnimateDiff-style temporal attention layers
+- **Integration**: Plugs into frozen DiT/MMDiT models
+- **Output**: Temporally coherent video frames for GIF generation
+
+### Key Features
+- Zero-initialized output for stable training with frozen base model
+- Temporal self-attention across video frames
+- Compatible with 64x64 resolution at 16 frames
+- Gradient checkpointing support for memory efficiency
+"""
     else:
         card += """This is a Diffusion Transformer (DiT/MMDiT) trained for text-to-image generation in latent space.
 
@@ -184,7 +210,36 @@ The VAE follows the SD3 architecture with 16 latent channels and f8 compression 
         card += json.dumps(_make_serializable(config), indent=2)
         card += "\n```\n"
 
-    card += """
+    if model_type == "motion":
+        card += """
+## Usage
+
+```python
+import torch
+from src.models.motion import MotionModule
+from src.inference.animation_generator import AnimationGenerator
+
+# Option 1: Use AnimationGenerator (recommended)
+generator = AnimationGenerator(
+    vae_checkpoint="checkpoints/vae.pt",
+    diffusion_checkpoint="checkpoints/diffusion.pt",
+    motion_checkpoint="motion.pt",
+)
+frames = generator.generate("a cat walking", num_frames=16)
+generator.save_gif(frames, "output.gif")
+
+# Option 2: Load motion module manually
+checkpoint = torch.load("motion.pt", map_location="cpu")
+motion_module = MotionModule(
+    hidden_size=384,  # Adjust based on base model
+    num_layers=checkpoint["config"]["motion_num_layers"],
+    num_heads=checkpoint["config"]["motion_num_heads"],
+)
+motion_module.load_state_dict(checkpoint["motion_module_state_dict"])
+```
+"""
+    else:
+        card += """
 ## Usage
 
 ```python
@@ -198,7 +253,9 @@ checkpoint = torch.load("model.pt", map_location="cpu")
 model = create_model(...)  # Use config from checkpoint
 model.load_state_dict(checkpoint["model_state_dict"])
 ```
+"""
 
+    card += """
 ## License
 
 MIT License
