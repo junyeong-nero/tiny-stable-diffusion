@@ -19,29 +19,22 @@ tiny-stable-diffusion은 **Stable Diffusion 3**의 아키텍처를 따르는 교
 
 ### 아키텍처 다이어그램
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         tiny-stable-diffusion Architecture                       │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                 │
-│  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐   │
-│  │    Image/   │────▶│     VAE     │────▶│  Diffusion  │────▶│   Output    │   │
-│  │    Video    │     │   Encoder   │     │  Transformer│     │  Image/GIF  │   │
-│  └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘   │
-│         │                   │                   ▲                   ▲           │
-│         │                   ▼                   │                   │           │
-│         │            ┌─────────────┐     ┌─────────────┐     ┌─────────────┐   │
-│         │            │   Latent    │     │    Text     │     │     VAE     │   │
-│         │            │  (F×16×8×8) │     │  Encoder    │     │   Decoder   │   │
-│         │            └─────────────┘     │   (CLIP)    │     └─────────────┘   │
-│         │                                └─────────────┘                       │
-│         │                                       ▲                               │
-│         │                                       │                               │
-│         │                                ┌─────────────┐                       │
-│         └───────────────────────────────▶│   Prompt    │                       │
-│                                          │  "a cat..."  │                       │
-│                                          └─────────────┘                       │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph LR
+    subgraph "tiny-stable-diffusion Architecture"
+        Input[Image/Video] --> VAE_Enc[VAE Encoder]
+        VAE_Enc --> Diffusion[Diffusion Transformer]
+        Diffusion --> VAE_Dec[VAE Decoder]
+        VAE_Dec --> Output[Output Image/GIF]
+
+        Prompt[Prompt "a cat..."] --> TextEnc[Text Encoder CLIP]
+        TextEnc --> Diffusion
+
+        subgraph "Details"
+            Latent[Latent Fx16x8x8]
+            VAE_Enc -.-> Latent -.-> Diffusion
+        end
+    end
 ```
 
 ### 핵심 특징
@@ -100,14 +93,11 @@ Latent representation에서 노이즈(Velocity)를 예측하는 트랜스포머 
 
 기존 이미지 생성 모델을 확장하여 시간적 일관성을 가진 애니메이션을 생성하는 모듈입니다.
 
-```
-┌──────────────────────────────────────────────────────┐
-│  MMDiT/DiT (frozen) + Motion Module (trainable)      │
-│  ┌─────────────────┐  ┌───────────────────────────┐  │
-│  │ Spatial Attn    │→ │ Temporal Attn (NEW)       │  │
-│  │ (기존, frozen)   │  │ (frames 간 attention)     │  │
-│  └─────────────────┘  └───────────────────────────┘  │
-└──────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph "MMDiT/DiT (frozen) + Motion Module (trainable)"
+        Spatial[Spatial Attn <br> 기존, frozen] --> Temporal[Temporal Attn NEW <br> frames 간 attention]
+    end
 ```
 
 - **구조**: Temporal Attention Layer를 기존 Spatial Attention 뒤에 삽입하여 프레임 간의 움직임을 학습합니다.

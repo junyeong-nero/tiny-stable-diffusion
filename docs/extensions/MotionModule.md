@@ -14,42 +14,22 @@ The Motion Module extends `tiny-stable-diffusion` to generate GIFs and short ani
 
 ### Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         Architecture Overview                           │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│   Text Prompt                                                           │
-│       │                                                                 │
-│       ▼                                                                 │
-│   ┌──────────┐                                                          │
-│   │   CLIP   │ (Existing, Frozen)                                       │
-│   └────┬─────┘                                                          │
-│        │                                                                │
-│        ▼                                                                │
-│   ┌──────────────────────────────────────────────────────────────┐      │
-│   │              Latent Diffusion (Time Extended)                │      │
-│   │  ┌────────────────────────────────────────────────────────┐  │      │
-│   │  │   z_t: (B, F, C, H, W)  ←  F = num_frames (16~32)      │  │      │
-│   │  └────────────────────────────────────────────────────────┘  │      │
-│   │                          │                                   │      │
-│   │                          ▼                                   │      │
-│   │  ┌──────────────────────────────────────────────────────┐    │      │
-│   │  │  MMDiT/DiT (frozen) + Motion Module (trainable)      │    │      │
-│   │  │  ┌─────────────────┐  ┌───────────────────────────┐  │    │      │
-│   │  │  │ Spatial Attn    │→ │ Temporal Attn (NEW)       │  │    │      │
-│   │  │  │ (Existing)      │  │ (Attention across frames) │  │    │      │
-│   │  │  └─────────────────┘  └───────────────────────────┘  │    │      │
-│   │  └──────────────────────────────────────────────────────┘    │      │
-│   └──────────────────────────────────────────────────────────────┘      │
-│                          │                                              │
-│                          ▼                                              │
-│   ┌──────────────────────────────────────────────────────────────┐      │
-│   │   VAE Decoder (Existing, Frozen)                             │      │
-│   │   z → (B, F, 3, 64, 64) → GIF                                │      │
-│   └──────────────────────────────────────────────────────────────┘      │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph "Architecture Overview"
+        Prompt[Text Prompt] --> CLIP[CLIP Existing, Frozen]
+        CLIP --> LatentDiff
+        
+        subgraph "Latent Diffusion Time Extended"
+            LatentDiff[z_t: B, F, C, H, W <br> F = num_frames 16~32] --> MMDiT
+            
+            subgraph "MMDiT/DiT frozen + Motion Module trainable"
+                MMDiT[Spatial Attn <br> Existing] --> Motion[Temporal Attn NEW <br> Attention across frames]
+            end
+        end
+        
+        Motion --> VAE_Dec[VAE Decoder Existing, Frozen <br> z -> B, F, 3, 64, 64 -> GIF]
+    end
 ```
 
 ## Quick Start

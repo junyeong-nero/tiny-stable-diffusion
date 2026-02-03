@@ -7,21 +7,21 @@
 ## ⚡ TL;DR
 
 A **200M parameter** implementation of Stable Diffusion 3 (SD3) trained on consumer GPUs.
-It uses **Rectified Flow** and **MMDiT** architecture to generate **64×64 images**.
+It uses **Rectified Flow** and **MMDiT** architecture to generate **64×64 images and GIFs**.
 
 **Quick Start:**
 ```bash
 # 1. Setup
 bash setup.sh
 
-# 2. Train VAE (or download weights)
+# 2. Train VAE -> Diffusion -> Motion (Optional)
 uv run main.py --train-vae
-
-# 3. Train Diffusion
 uv run main.py --train-diffusion
+uv run main.py --train-motion
 
-# 4. Generate
+# 3. Generate
 uv run main.py --generate --prompt "a cute cat"
+uv run main.py --generate-gif --prompt "a cat walking"
 ```
 
 ---
@@ -37,19 +37,20 @@ A lightweight, educational implementation of **Stable Diffusion 3** built from s
   - **VAE**: AutoencoderKL with f8 compression (16 latent channels)
   - **MMDiT**: Multi-Modal Diffusion Transformer with Joint Attention
   - **Rectified Flow**: Linear interpolation based diffusion training
-- **Two-Stage Training**: Train VAE first, then diffusion model in latent space
+- **GIF Generation**: Extension using a **Motion Module** (AnimateDiff style) for consistent animations
+- **Three-Stage Training**: VAE -> Diffusion -> Motion Module
 - **Beginner-Friendly**: Clean, readable code with minimal dependencies
 
 ---
 
 ## Overall Pipeline
 
-The system works in two distinct stages, mirroring the standard Latent Diffusion Model (LDM) approach but with SD3 improvements.
+The system works in three distinct stages, mirroring the standard Latent Diffusion Model (LDM) approach with temporal extensions.
 
 ### 1. Training Pipeline
 
 ```mermaid
-graph LR
+graph TD
     subgraph Stage 1: VAE
     I[Image 64px] --> E[Encoder]
     E --> L[Latent 8x8x16]
@@ -58,21 +59,29 @@ graph LR
     end
     
     subgraph Stage 2: Diffusion
-    T[Text "a cat"] --> CLIP[CLIP Encoder]
+    T[Text] --> CLIP[CLIP Encoder]
     CLIP --> Emb[Text Embeds]
     L2[Latent] --> Noise[Add Noise]
     Noise --> MMDiT
     Emb --> MMDiT
     MMDiT --> Pred[Predict Velocity]
     end
+
+    subgraph Stage 3: Motion
+    V[Video] --> VAE_E[Frozen VAE]
+    VAE_E --> VL[Video Latents]
+    VL --> M_Noise[Add Noise]
+    M_Noise --> AMMDiT[Animated MMDiT]
+    Emb --> AMMDiT
+    AMMDiT --> M_Pred[Predict Velocity]
+    end
 ```
 
 ### 2. Inference Pipeline
 
 ```
-Prompt "a cat" ──► CLIP ──► Text Embeds ──┐
-                                          ▼
-Random Noise ──► MMDiT (Rectified Flow) ──► Denoised Latent ──► VAE Decoder ──► Image
+Image: Prompt ──► CLIP ──► MMDiT ──► VAE Decoder ──► Image
+GIF:   Prompt ──► CLIP ──► Animated MMDiT ──► VAE Decoder ──► GIF
 ```
 
 ---
@@ -88,39 +97,30 @@ See `setup.sh` for detailed setup instructions.
 bash setup.sh
 ```
 
-### 2. Download Pretrained Weights
+### 2. Inference
 
-Download the pretrained VAE and Diffusion model checkpoints:
+#### Image Generation
 
-```bash
-# Download pretrained weights (coming soon)
-# Place checkpoints in the checkpoints/ directory
-```
-
-### 3. Inference
-
-#### VAE Reconstruction
-
-Test the VAE encoder-decoder by reconstructing images:
-
-```bash
-uv run main.py --reconstruct --image path/to/image.png
-```
-
-#### Diffusion (Text-to-Image Generation)
-
-Generate images from text prompts using the diffusion model:
+Generate images from text prompts:
 
 ```bash
 uv run main.py --generate --prompt "a cute cat" --steps 50 --guidance 7.5
 ```
 
-### 4. Web Demo
+#### GIF Generation
 
-Launch the interactive Streamlit web interface:
+Generate 16-frame animations from text prompts:
 
 ```bash
-uv run streamlit run src/demo/app.py
+uv run main.py --generate-gif --prompt "a cat walking" --frames 16 --fps 8
+```
+
+### 3. Training
+
+```bash
+./scripts/train-vae.sh       # Stage 1
+./scripts/train-diffusion.sh # Stage 2
+./scripts/train-motion.sh    # Stage 3 (GIF extension)
 ```
 
 ---
@@ -129,9 +129,10 @@ uv run streamlit run src/demo/app.py
 
 | Component | Parameters | Description |
 |-----------|------------|-------------|
-| **VAE** | ~21M | **AutoencoderKL**: Compresses 64×64 images to 8×8×16 latents. Uses a "f8" compression factor. |
-| **MMDiT** | ~187M (Base) | **Multi-Modal DiT**: Uses Joint Attention to process text and image tokens simultaneously. |
-| **CLIP** | 123M | **Text Encoder**: Frozen CLIP ViT-B/32 model for text embeddings. |
+| **VAE** | ~21M | **AutoencoderKL**: Compresses 64×64 images to 8×8×16 latents. |
+| **MMDiT** | ~187M (Base) | **Multi-Modal DiT**: Uses Joint Attention for text and image tokens. |
+| **Motion Module**| ~50M | **Temporal Attention**: Injected layers for frame consistency. |
+| **CLIP** | 123M | **Text Encoder**: Frozen CLIP ViT-B/32 model. |
 
 **Comparison with SD3:**
 
@@ -185,6 +186,21 @@ tiny-stable-diffusion/
 ├── docs/                # Documentation
 └── samples/             # Generated images
 ```
+
+---
+
+## Extensions / Roadmap
+
+We are actively working on extending `tiny-stable-diffusion` with new capabilities.
+
+### 🎥 Motion Module (GIF Generation) - *In Progress*
+
+We are implementing a **Motion Module** to generate GIFs and short animations using the existing pre-trained models. This is inspired by [AnimateDiff](https://arxiv.org/abs/2307.04725).
+
+- **Goal**: Generate consistent 16-frame animations from text prompts.
+- **Approach**: Inject temporal attention layers into the frozen MMDiT backbone.
+- **Status**: Core modules and data pipeline implemented. Training loop in progress.
+- **Documentation**: [docs/extensions/MotionModule.md](docs/extensions/MotionModule.md)
 
 ---
 

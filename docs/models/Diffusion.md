@@ -40,12 +40,22 @@ The Diffusion model is the **second stage** of the Stable Diffusion pipeline. It
 
 ### Pipeline Flow
 
-```
-Training:
-Image (64×64) → VAE Encoder → Latent (8×8×16) → Add Noise → MMDiT → Predict Velocity
+```mermaid
+graph TD
+    subgraph "Training"
+        Img[Image 64x64] --> VAE_Enc[VAE Encoder]
+        VAE_Enc --> Latent[Latent 8x8x16]
+        Latent --> AddNoise[Add Noise]
+        AddNoise --> MMDiT[MMDiT]
+        MMDiT --> PredVel[Predict Velocity]
+    end
 
-Generation:
-Random Noise → MMDiT Denoise (50 steps) → Clean Latent → VAE Decoder → Image (64×64)
+    subgraph "Generation"
+        RandNoise[Random Noise] --> Denoise[MMDiT Denoise 50 steps]
+        Denoise --> CleanLatent[Clean Latent]
+        CleanLatent --> VAE_Dec[VAE Decoder]
+        VAE_Dec --> GenImg[Image 64x64]
+    end
 ```
 
 ---
@@ -87,44 +97,23 @@ tiny-stable-diffusion supports two architectures:
 
 ### MMDiT Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         MMDiT Block                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   ┌──────────────┐    ┌──────────────┐                          │
-│   │ Text Tokens  │    │ Image Tokens │                          │
-│   │   (B, 1, D)  │    │  (B, N, D)   │                          │
-│   └──────┬───────┘    └──────┬───────┘                          │
-│          │                   │                                   │
-│          └─────────┬─────────┘                                   │
-│                    ▼                                             │
-│          ┌─────────────────┐                                     │
-│          │ Joint Attention │ ← Text and Image attend together   │
-│          │   (QK-RMSNorm)  │                                     │
-│          └────────┬────────┘                                     │
-│                   │                                              │
-│          ┌────────┴────────┐                                     │
-│          ▼                 ▼                                     │
-│   ┌────────────┐    ┌────────────┐                              │
-│   │  Text MLP  │    │ Image MLP  │ ← Separate MLPs              │
-│   └────────────┘    └────────────┘                              │
-│          │                 │                                     │
-│          └────────┬────────┘                                     │
-│                   ▼                                              │
-│          ┌─────────────────┐                                     │
-│          │ Time Modulation │ ← AdaLN from timestep embedding    │
-│          └─────────────────┘                                     │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-                              × L layers (12 for B size)
-                                        ↓
-                            ┌─────────────────┐
-                            │   Final Layer   │
-                            │  Unpatchify     │
-                            └─────────────────┘
-                                        ↓
-                            Output (B, 16, 8, 8)
+```mermaid
+graph TD
+    subgraph "MMDiT Block (x L layers)"
+        TextTokens[Text Tokens B, 1, D] --> JointAttn
+        ImageTokens[Image Tokens B, N, D] --> JointAttn
+        
+        JointAttn[Joint Attention <br> QK-RMSNorm <br> Text and Image attend together] --> TextMLP
+        JointAttn --> ImageMLP
+        
+        TextMLP[Text MLP] --> TimeMod
+        ImageMLP[Image MLP] --> TimeMod
+        
+        TimeMod[Time Modulation <br> AdaLN from timestep embedding]
+    end
+    
+    TimeMod --> FinalLayer
+    FinalLayer[Final Layer <br> Unpatchify] --> Output[Output B, 16, 8, 8]
 ```
 
 ### Key Components

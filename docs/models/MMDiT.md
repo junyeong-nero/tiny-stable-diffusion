@@ -32,33 +32,21 @@ This leads to significantly better text comprehension and typography generation.
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                               MMDiT Block                                │
-├──────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│      Image Tokens (N×D)                  Text Tokens (M×D)               │
-│             │                                   │                        │
-│             ▼                                   ▼                        │
-│      ┌─────────────┐                     ┌─────────────┐                 │
-│      │  Layernorm  │                     │  Layernorm  │                 │
-│      └──────┬──────┘                     └──────┬──────┘                 │
-│             │                                   │                        │
-│             ▼                                   ▼                        │
-│      ┌─────────────────────────────────────────────────┐                 │
-│      │                 Joint Attention                 │                 │
-│      │    [ Image_Q | Text_Q ] @ [ Image_K | Text_K ]T │                 │
-│      └──────┬─────────────────────┬────────────────────┘                 │
-│             │                     │                                      │
-│             ▼                     ▼                                      │
-│      ┌─────────────┐       ┌─────────────┐                               │
-│      │     MLP     │       │     MLP     │                               │
-│      └──────┬──────┘       └──────┬──────┘                               │
-│             │                     │                                      │
-│             ▼                     ▼                                      │
-│         New Image             New Text                                   │
-│                                                                          │
-└──────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph "MMDiT Block"
+        ImgTokens["Image Tokens (NxD)"] --> LN1["Layernorm"]
+        TxtTokens["Text Tokens (MxD)"] --> LN2["Layernorm"]
+        
+        LN1 --> JointAttn["Joint Attention <br> [Image_Q | Text_Q] @ [Image_K | Text_K]^T"]
+        LN2 --> JointAttn
+        
+        JointAttn --> MLP1["MLP (Image)"]
+        JointAttn --> MLP2["MLP (Text)"]
+        
+        MLP1 --> NewImg["New Image"]
+        MLP2 --> NewTxt["New Text"]
+    end
 ```
 
 ### Data Flow

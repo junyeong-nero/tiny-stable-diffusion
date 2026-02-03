@@ -52,23 +52,13 @@ The VAE (Variational AutoEncoder) is the **first stage** of the Stable Diffusion
 
 ### High-Level Structure
 
-```
-Input Image (64×64×3)
-        ↓
-   ┌─────────┐
-   │ Encoder │ ← Conv3x3 + ResBlocks + Downsample×3 + Attention
-   └────┬────┘
-        ↓
-   ┌─────────┐
-   │ Latent  │ ← (mean, logvar) → Reparameterization → z
-   │ (8×8×16)│
-   └────┬────┘
-        ↓
-   ┌─────────┐
-   │ Decoder │ ← Conv3x3 + ResBlocks + Upsample×3 + Attention
-   └────┬────┘
-        ↓
-Output Image (64×64×3)
+```mermaid
+graph TD
+    Input[Input Image 64x64x3] --> Encoder
+    Encoder[Encoder <br> Conv3x3 + ResBlocks + Downsamplex3 + Attention] --> Latent
+    Latent[Latent <br> 8x8x16 <br> mean, logvar -> Reparameterization -> z] --> Decoder
+    Decoder[Decoder <br> Conv3x3 + ResBlocks + Upsamplex3 + Attention] --> Output
+    Output[Output Image 64x64x3]
 ```
 
 ### Encoder Architecture
