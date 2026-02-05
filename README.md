@@ -84,12 +84,22 @@ Image: Prompt ──► CLIP ──► MMDiT ──► VAE Decoder ──► Ima
 GIF:   Prompt ──► CLIP ──► Animated MMDiT ──► VAE Decoder ──► GIF
 ```
 
-### 3. Sample Output (Landscape Retest)
+### 3. Sample Outputs (Prompt-Image Pairs)
 
-Prompt: `a serene mountain lake at sunset, ultra detailed`  
-Settings: `steps=50`, `guidance=7.5`, `num_samples=4`, `seed=44`
+Settings: `steps=50`, `guidance=7.5`, `num_samples=1`
 
-![Landscape Retest Samples](docs/assets/landscape_retest_sheet.png)
+| Prompt | Image |
+|---|---|
+| `a fluffy orange cat on a sofa` | ![Prompt 01](docs/assets/diffusion_prompt_01.png) |
+| `a red sports car on a rainy street` | ![Prompt 02](docs/assets/diffusion_prompt_02.png) |
+| `a small cabin in snowy mountains` | ![Prompt 03](docs/assets/diffusion_prompt_03.png) |
+| `a sunflower field at sunset` | ![Prompt 04](docs/assets/diffusion_prompt_04.png) |
+| `a bowl of ramen on a wooden table` | ![Prompt 05](docs/assets/diffusion_prompt_05.png) |
+| `a futuristic city skyline at night` | ![Prompt 06](docs/assets/diffusion_prompt_06.png) |
+| `a corgi wearing sunglasses` | ![Prompt 07](docs/assets/diffusion_prompt_07.png) |
+| `a lighthouse by rough ocean waves` | ![Prompt 08](docs/assets/diffusion_prompt_08.png) |
+| `a watercolor painting of a tulip` | ![Prompt 09](docs/assets/diffusion_prompt_09.png) |
+| `an astronaut walking on the moon` | ![Prompt 10](docs/assets/diffusion_prompt_10.png) |
 
 ---
 
