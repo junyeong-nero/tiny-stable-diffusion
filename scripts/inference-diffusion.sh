@@ -19,7 +19,7 @@
 # Multiple images example:
 #   NUM_SAMPLES=4 ./scripts/inference-diffusion.sh "a cute tabby kitten"
 
-set -e
+set -euo pipefail
 
 DIFFUSION_CHECKPOINT="${DIFFUSION_CHECKPOINT:-checkpoints/diffusion.pt}"
 VAE_CHECKPOINT="${VAE_CHECKPOINT:-checkpoints/vae.pt}"
@@ -46,32 +46,41 @@ if [ -n "$SEED" ]; then
 fi
 echo ""
 
-# Build command
-CMD="uv run main.py --generate"
-CMD="$CMD --prompt \"$PROMPT\""
-CMD="$CMD --checkpoint \"$DIFFUSION_CHECKPOINT\""
-CMD="$CMD --vae-checkpoint \"$VAE_CHECKPOINT\""
-CMD="$CMD --steps $STEPS"
-CMD="$CMD --guidance $GUIDANCE"
-CMD="$CMD --scaling-factor $SCALING_FACTOR"
-CMD="$CMD --num-samples $NUM_SAMPLES"
+CMD=(
+    uv run main.py --generate
+    --prompt "$PROMPT"
+    --checkpoint "$DIFFUSION_CHECKPOINT"
+    --vae-checkpoint "$VAE_CHECKPOINT"
+    --steps "$STEPS"
+    --guidance "$GUIDANCE"
+    --scaling-factor "$SCALING_FACTOR"
+    --num-samples "$NUM_SAMPLES"
+)
 
-# Set output based on number of samples
 if [ "$NUM_SAMPLES" -gt 1 ]; then
-    # For multiple samples, output to directory
     OUTPUT_DIR="${OUTPUT%.png}"
-    CMD="$CMD --output-dir \"$OUTPUT_DIR\""
     echo "Saving $NUM_SAMPLES samples to: $OUTPUT_DIR/"
 else
-    CMD="$CMD --output \"$OUTPUT\""
+    CMD+=(--output "$OUTPUT")
 fi
 
 if [ -n "$SEED" ]; then
-    CMD="$CMD --seed $SEED"
+    CMD+=(--seed "$SEED")
 fi
 
 echo ""
-echo "Running: $CMD"
+echo "Running: ${CMD[*]}"
 echo ""
 
-eval $CMD
+"${CMD[@]}"
+
+if [ "$NUM_SAMPLES" -gt 1 ]; then
+    mkdir -p "$OUTPUT_DIR"
+    for ((i = 0; i < NUM_SAMPLES; i++)); do
+        src="output_${i}.png"
+        if [ -f "$src" ]; then
+            mv -f "$src" "$OUTPUT_DIR/$src"
+            echo "Saved: $OUTPUT_DIR/$src"
+        fi
+    done
+fi

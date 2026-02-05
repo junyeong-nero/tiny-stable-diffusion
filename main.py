@@ -51,7 +51,12 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=None, help="Learning rate")
 
     # Generation arguments
-    parser.add_argument("--prompt", type=str, default=None, help="Prompt for generation")
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        default=None,
+        help="Prompt for generation (use '||' to separate multiple prompts)",
+    )
     parser.add_argument("--input", type=str, default=None, help="Input image path (for --reconstruct-vae)")
     parser.add_argument("--input-dir", type=str, default=None, help="Input directory for batch VAE reconstruction")
     parser.add_argument("--output-dir", type=str, default=None, help="Output directory for batch VAE reconstruction")
@@ -232,6 +237,17 @@ def _run_diffusion_training(args: argparse.Namespace) -> None:
         )
 
 
+def _parse_prompts(prompt_arg: str) -> list[str]:
+    """Parse prompt string while allowing commas inside a single prompt.
+
+    Multiple prompts can be passed by separating them with '||'.
+    """
+    if "||" in prompt_arg:
+        prompts = [p.strip() for p in prompt_arg.split("||")]
+        return [p for p in prompts if p]
+    return [prompt_arg.strip()]
+
+
 def _run_generation(args: argparse.Namespace) -> None:
     """Run image generation."""
     from src.inference.generator import generate
@@ -240,7 +256,7 @@ def _run_generation(args: argparse.Namespace) -> None:
         print("Error: --prompt required for --generate")
         return
 
-    prompts = [p.strip() for p in args.prompt.split(",")]
+    prompts = _parse_prompts(args.prompt)
 
     images = generate(
         prompts=prompts,
@@ -396,7 +412,7 @@ def _run_gif_generation(args: argparse.Namespace) -> None:
     )
 
     # Generate for each prompt
-    prompts = [p.strip() for p in args.prompt.split(",")]
+    prompts = _parse_prompts(args.prompt)
 
     for i, prompt in enumerate(prompts):
         if len(prompts) > 1 or args.num_samples > 1:

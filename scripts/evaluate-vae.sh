@@ -34,7 +34,7 @@
 # Environment variables:
 #   VAE_CHECKPOINT - Default checkpoint path (default: auto-detect)
 
-set -e
+set -euo pipefail
 
 # Default values
 VAE_CHECKPOINT="${VAE_CHECKPOINT:-}"
@@ -107,40 +107,40 @@ echo "VAE Reconstruction Quality Evaluation"
 echo "========================================"
 
 # Build command
-CMD="uv run python -m src.evaluation.vae_evaluator"
+CMD=(uv run python -m src.evaluation.vae_evaluator)
 
 if [ -n "$INPUT_DIR" ]; then
     echo "Input directory: $INPUT_DIR"
-    CMD="$CMD --input-dir \"$INPUT_DIR\""
+    CMD+=(--input-dir "$INPUT_DIR")
 fi
 
 if [ -n "$DATASET" ]; then
     echo "Dataset: $DATASET"
-    CMD="$CMD --dataset \"$DATASET\" --split \"$SPLIT\" --image-field \"$IMAGE_FIELD\""
+    CMD+=(--dataset "$DATASET" --split "$SPLIT" --image-field "$IMAGE_FIELD")
 fi
 
 if [ -n "$VAE_CHECKPOINT" ]; then
     echo "Checkpoint: $VAE_CHECKPOINT"
-    CMD="$CMD --checkpoint \"$VAE_CHECKPOINT\""
+    CMD+=(--checkpoint "$VAE_CHECKPOINT")
 else
     echo "Checkpoint: auto-detect"
 fi
 
 echo "Max samples: $MAX_SAMPLES"
-CMD="$CMD --max-samples $MAX_SAMPLES"
+CMD+=(--max-samples "$MAX_SAMPLES")
 
 if [ -n "$SAVE_PATH" ]; then
     echo "Save results to: $SAVE_PATH"
-    CMD="$CMD --save \"$SAVE_PATH\""
+    CMD+=(--save "$SAVE_PATH")
 fi
 
 if [ -n "$NO_LPIPS" ]; then
     echo "LPIPS: disabled"
-    CMD="$CMD $NO_LPIPS"
+    CMD+=("$NO_LPIPS")
 fi
 
 echo "========================================"
 echo ""
 
-# Run evaluation
-eval $CMD
+echo "Running: ${CMD[*]}"
+"${CMD[@]}"

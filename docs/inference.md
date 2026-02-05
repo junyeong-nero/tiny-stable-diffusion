@@ -11,6 +11,8 @@
 5. [Advanced Options](#advanced-options)
 6. [Performance Optimization](#performance-optimization)
 
+Script reference: [`scripts/README.md`](../scripts/README.md)
+
 ---
 
 ## Generation Pipeline Overview

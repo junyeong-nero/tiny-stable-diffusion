@@ -1,13 +1,42 @@
-python scripts/upload_to_hub.py --model-type vae --repo-id username/tiny-sd-vae
+#!/bin/bash
+# HuggingFace helper wrapper.
+#
+# Usage:
+#   ./scripts/hf.sh upload vae <repo-id>
+#   ./scripts/hf.sh upload diffusion <repo-id>
+#   ./scripts/hf.sh upload all <repo-id>
+#   ./scripts/hf.sh download vae <repo-id>
+#   ./scripts/hf.sh download diffusion <repo-id>
+#   ./scripts/hf.sh download all <repo-id>
 
-# Diffusion만 업로드
-python scripts/upload_to_hub.py --model-type diffusion --repo-id username/tiny-sd-diffusion
+set -euo pipefail
 
-# 둘 다 하나의 repo에 업로드
-python scripts/upload_to_hub.py --model-type all --repo-id username/tiny-sd-models
+if [ "$#" -lt 3 ]; then
+    echo "Usage: $0 <upload|download> <vae|diffusion|all> <repo-id>"
+    exit 1
+fi
 
-# VAE 다운로드
-python scripts/download_from_hub.py --repo-id username/tiny-sd-vae --model-type vae
+ACTION="$1"
+MODEL_TYPE="$2"
+REPO_ID="$3"
+shift 3
 
-# 모든 모델 다운로드
-python scripts/download_from_hub.py --repo-id username/tiny-sd-models --model-type all
+case "$ACTION" in
+    upload)
+        uv run python scripts/upload_to_hub.py \
+            --model-type "$MODEL_TYPE" \
+            --repo-id "$REPO_ID" \
+            "$@"
+        ;;
+    download)
+        uv run python scripts/download_from_hub.py \
+            --model-type "$MODEL_TYPE" \
+            --repo-id "$REPO_ID" \
+            "$@"
+        ;;
+    *)
+        echo "Unknown action: $ACTION"
+        echo "Expected: upload or download"
+        exit 1
+        ;;
+esac

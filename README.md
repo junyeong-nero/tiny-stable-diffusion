@@ -12,7 +12,7 @@ It uses **Rectified Flow** and **MMDiT** architecture to generate **64×64 image
 **Quick Start:**
 ```bash
 # 1. Setup
-bash setup.sh
+bash scripts/setup.sh
 
 # 2. Train VAE -> Diffusion -> Motion (Optional)
 uv run main.py --train-vae
@@ -90,11 +90,12 @@ GIF:   Prompt ──► CLIP ──► Animated MMDiT ──► VAE Decoder ─�
 
 ### 1. Environment Setup
 
-See `setup.sh` for detailed setup instructions.
+See [`scripts/setup.sh`](scripts/setup.sh) for detailed setup instructions.
+For all helper scripts, see [`scripts/README.md`](scripts/README.md).
 
 ```bash
 # Quick setup
-bash setup.sh
+bash scripts/setup.sh
 ```
 
 ### 2. Inference
@@ -122,6 +123,8 @@ uv run main.py --generate-gif --prompt "a cat walking" --frames 16 --fps 8
 ./scripts/train-diffusion.sh # Stage 2
 ./scripts/train-motion.sh    # Stage 3 (GIF extension)
 ```
+
+More script usage: [`scripts/README.md`](scripts/README.md)
 
 ---
 

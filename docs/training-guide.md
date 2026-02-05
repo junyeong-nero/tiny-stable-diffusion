@@ -15,6 +15,8 @@
 
 ## Quick Start
 
+For script wrappers and examples, see [`scripts/README.md`](../scripts/README.md).
+
 ### 1. Environment Setup
 
 ```bash

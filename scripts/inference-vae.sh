@@ -13,12 +13,12 @@
 # Environment variables:
 #   VAE_CHECKPOINT - Path to VAE checkpoint (default: checkpoints/vae_e30.pt)
 
-set -e
+set -euo pipefail
 
-VAE_CHECKPOINT="${VAE_CHECKPOINT:-checkpoints/vae_e40.pt}"
+VAE_CHECKPOINT="${VAE_CHECKPOINT:-checkpoints/vae.pt}"
 
 # Check for --all flag
-if [ "$1" = "--all" ]; then
+if [ "${1:-}" = "--all" ]; then
     echo "VAE Batch Inference"
     echo "==================="
     echo "Checkpoint: $VAE_CHECKPOINT"

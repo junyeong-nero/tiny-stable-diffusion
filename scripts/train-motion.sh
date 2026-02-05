@@ -11,12 +11,16 @@
 #   - Batch Size: 8
 #   - Gradient Accumulation: 4
 
+set -euo pipefail
+
 echo "Starting Motion Module Training..."
 
 # Ensure checkpoints directory exists
 mkdir -p checkpoints
 
+CHECKPOINT="${CHECKPOINT:-checkpoints/motion.pt}"
+
 uv run main.py --train-motion \
     --wandb \
-    --checkpoint checkpoints/motion.pt \
+    --checkpoint "$CHECKPOINT" \
     "$@"
