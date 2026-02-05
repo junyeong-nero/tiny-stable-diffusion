@@ -30,13 +30,22 @@ GUIDANCE="${GUIDANCE:-7.5}"
 SEED="${SEED:-}"
 NUM_SAMPLES="${NUM_SAMPLES:-1}"
 SCALING_FACTOR="${SCALING_FACTOR:-0.4869}"
+RESULTS_DIR="${RESULTS_DIR:-results/diffusion}"
+
+if [[ "$OUTPUT" == results/* ]]; then
+    OUTPUT_PATH="$OUTPUT"
+else
+    OUTPUT_PATH="$RESULTS_DIR/$OUTPUT"
+fi
+
+mkdir -p "$RESULTS_DIR"
 
 echo "Diffusion Model Inference"
 echo "========================="
 echo "Diffusion checkpoint: $DIFFUSION_CHECKPOINT"
 echo "VAE checkpoint: $VAE_CHECKPOINT"
 echo "Prompt: $PROMPT"
-echo "Output: $OUTPUT"
+echo "Output: $OUTPUT_PATH"
 echo "Steps: $STEPS"
 echo "Guidance scale: $GUIDANCE"
 echo "Number of samples: $NUM_SAMPLES"
@@ -58,10 +67,11 @@ CMD=(
 )
 
 if [ "$NUM_SAMPLES" -gt 1 ]; then
-    OUTPUT_DIR="${OUTPUT%.png}"
+    OUTPUT_DIR="${OUTPUT_PATH%.png}"
     echo "Saving $NUM_SAMPLES samples to: $OUTPUT_DIR/"
 else
-    CMD+=(--output "$OUTPUT")
+    mkdir -p "$(dirname "$OUTPUT_PATH")"
+    CMD+=(--output "$OUTPUT_PATH")
 fi
 
 if [ -n "$SEED" ]; then

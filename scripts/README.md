@@ -12,9 +12,13 @@ All training scripts forward extra CLI arguments to `main.py`.
 
 ## Inference / Evaluation
 
-- `scripts/inference-vae.sh`: Reconstruct image(s) with VAE
+- `scripts/inference-vae.sh`: Reconstruct image(s) with VAE and save reconstruction metrics (PSNR/SSIM/MSE/LPIPS)
 - `scripts/inference-diffusion.sh`: Generate image(s) from text prompt
 - `scripts/evaluate-vae.sh`: Evaluate VAE reconstruction quality
+
+Default outputs are saved under `results/`:
+- VAE: `results/vae/`
+- Diffusion: `results/diffusion/`
 
 ## HuggingFace Hub
 

@@ -1,0 +1,20 @@
+{
+  "checkpoint": "checkpoints/vae.pt",
+  "epoch": 39,
+  "input_dir": "/var/folders/l8/ydsw65lj3fxgkpyx8p8ht3b80000gn/T/tmp.GEAQLbC8Bt",
+  "metrics": {
+    "psnr": 39.20636766011933,
+    "ssim": 0.9936661124229431,
+    "mse": 0.00012005029566353187,
+    "lpips": null,
+    "num_samples": 1
+  },
+  "per_sample": [
+    {
+      "file": "sample_0.png",
+      "psnr": 39.20636766011933,
+      "ssim": 0.9936661124229431,
+      "mse": 0.00012005029566353187
+    }
+  ]
+}

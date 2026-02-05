@@ -22,6 +22,8 @@ data/*
 assets/
 output*.png
 *.png
+!docs/assets/
+!docs/assets/*.png
 !docs/**/*.png
 !samples/original/sample_*.png
 !samples/vae_reconstructed/*.png

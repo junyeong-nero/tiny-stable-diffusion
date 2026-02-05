@@ -84,6 +84,13 @@ Image: Prompt ──► CLIP ──► MMDiT ──► VAE Decoder ──► Ima
 GIF:   Prompt ──► CLIP ──► Animated MMDiT ──► VAE Decoder ──► GIF
 ```
 
+### 3. Sample Output (Landscape Retest)
+
+Prompt: `a serene mountain lake at sunset, ultra detailed`  
+Settings: `steps=50`, `guidance=7.5`, `num_samples=4`, `seed=44`
+
+![Landscape Retest Samples](docs/assets/landscape_retest_sheet.png)
+
 ---
 
 ## Usage
