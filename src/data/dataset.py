@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import random
+import warnings
 from typing import Callable
 
 import requests
@@ -415,6 +416,7 @@ class WebDatasetCaptionDataset(IterableDataset):
         self.target_size = target_size
         self.buffer_size = buffer_size
         self.skip_failures = skip_failures
+        self._skipped_corrupt_exif = 0
 
         if transform is None:
             self.transform = transforms.Compose([
@@ -453,10 +455,25 @@ class WebDatasetCaptionDataset(IterableDataset):
             if image is None:
                 return None
 
-            # WebDataset with decode('pil') returns PIL Image directly
+            # Decode bytes locally and skip samples with corrupt EXIF warnings.
             if not isinstance(image, Image.Image):
                 if isinstance(image, bytes):
-                    image = Image.open(io.BytesIO(image))
+                    with warnings.catch_warnings(record=True) as caught:
+                        warnings.simplefilter("always")
+                        image = Image.open(io.BytesIO(image))
+                        image.load()
+                    has_corrupt_exif = any(
+                        isinstance(w.message, UserWarning) and "Corrupt EXIF data" in str(w.message)
+                        for w in caught
+                    )
+                    if has_corrupt_exif:
+                        self._skipped_corrupt_exif += 1
+                        if self._skipped_corrupt_exif <= 3 or self._skipped_corrupt_exif % 100 == 0:
+                            print(
+                                "WebDatasetCaptionDataset: skipped sample with corrupt EXIF "
+                                f"(total skipped: {self._skipped_corrupt_exif})"
+                            )
+                        return None
                 else:
                     return None
 
@@ -485,11 +502,10 @@ class WebDatasetCaptionDataset(IterableDataset):
     def __iter__(self):
         import webdataset as wds
 
-        # Create WebDataset pipeline with shuffling
+        # Keep samples as raw bytes and decode in _process_sample to handle PIL warnings.
         dataset = (
             wds.WebDataset(self._urls, shardshuffle=True)
             .shuffle(self.buffer_size)
-            .decode("pil")
         )
 
         for sample in dataset:
