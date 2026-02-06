@@ -7,21 +7,19 @@
 ## ⚡ TL;DR
 
 A **200M parameter** implementation of Stable Diffusion 3 (SD3) trained on consumer GPUs.
-It uses **Rectified Flow** and **MMDiT** architecture to generate **64×64 images and GIFs**.
+It uses **Rectified Flow** and **MMDiT** architecture to generate **64×64 images**.
 
 **Quick Start:**
 ```bash
 # 1. Setup
 bash scripts/setup.sh
 
-# 2. Train VAE -> Diffusion -> Motion (Optional)
+# 2. Train VAE -> Diffusion
 uv run main.py --train-vae
 uv run main.py --train-diffusion
-uv run main.py --train-motion
 
 # 3. Generate
 uv run main.py --generate --prompt "a cute cat"
-uv run main.py --generate-gif --prompt "a cat walking"
 ```
 
 ---
@@ -37,15 +35,14 @@ A lightweight, educational implementation of **Stable Diffusion 3** built from s
   - **VAE**: AutoencoderKL with f8 compression (16 latent channels)
   - **MMDiT**: Multi-Modal Diffusion Transformer with Joint Attention
   - **Rectified Flow**: Linear interpolation based diffusion training
-- **GIF Generation**: Extension using a **Motion Module** (AnimateDiff style) for consistent animations
-- **Three-Stage Training**: VAE -> Diffusion -> Motion Module
+- **Two-Stage Training**: VAE -> Diffusion
 - **Beginner-Friendly**: Clean, readable code with minimal dependencies
 
 ---
 
 ## Overall Pipeline
 
-The system works in three distinct stages, mirroring the standard Latent Diffusion Model (LDM) approach with temporal extensions.
+The system works in two distinct stages, mirroring the standard Latent Diffusion Model (LDM) approach.
 
 ### 1. Training Pipeline
 
@@ -67,21 +64,12 @@ graph TD
     MMDiT --> Pred[Predict Velocity]
     end
 
-    subgraph Stage 3: Motion
-    V[Video] --> VAE_E[Frozen VAE]
-    VAE_E --> VL[Video Latents]
-    VL --> M_Noise[Add Noise]
-    M_Noise --> AMMDiT[Animated MMDiT]
-    Emb --> AMMDiT
-    AMMDiT --> M_Pred[Predict Velocity]
-    end
 ```
 
 ### 2. Inference Pipeline
 
 ```
 Image: Prompt ──► CLIP ──► MMDiT ──► VAE Decoder ──► Image
-GIF:   Prompt ──► CLIP ──► Animated MMDiT ──► VAE Decoder ──► GIF
 ```
 
 ### 3. Sample Outputs (Prompt-Image Pairs)
@@ -125,20 +113,11 @@ Generate images from text prompts:
 uv run main.py --generate --prompt "a cute cat" --steps 50 --guidance 7.5
 ```
 
-#### GIF Generation
-
-Generate 16-frame animations from text prompts:
-
-```bash
-uv run main.py --generate-gif --prompt "a cat walking" --frames 16 --fps 8
-```
-
 ### 3. Training
 
 ```bash
 ./scripts/train-vae.sh       # Stage 1
 ./scripts/train-diffusion.sh # Stage 2
-./scripts/train-motion.sh    # Stage 3 (GIF extension)
 ```
 
 More script usage: [`scripts/README.md`](scripts/README.md)
@@ -151,7 +130,6 @@ More script usage: [`scripts/README.md`](scripts/README.md)
 |-----------|------------|-------------|
 | **VAE** | ~21M | **AutoencoderKL**: Compresses 64×64 images to 8×8×16 latents. |
 | **MMDiT** | ~187M (Base) | **Multi-Modal DiT**: Uses Joint Attention for text and image tokens. |
-| **Motion Module**| ~50M | **Temporal Attention**: Injected layers for frame consistency. |
 | **CLIP** | 123M | **Text Encoder**: Frozen CLIP ViT-B/32 model. |
 
 **Comparison with SD3:**
@@ -209,7 +187,7 @@ tiny-stable-diffusion/
 
 ---
 
-## Extensions / Roadmap
+## TODO
 
 We are actively working on extending `tiny-stable-diffusion` with new capabilities.
 
