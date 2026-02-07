@@ -25,8 +25,7 @@ output*.png
 !docs/assets/
 !docs/assets/*.png
 !docs/**/*.png
-!samples/original/sample_*.png
-!samples/vae_reconstructed/*.png
+!samples/original/
 
 # Python-generated files
 __pycache__/
@@ -43,4 +42,3 @@ wheels/
 *.tmp
 *.log
 /tmp/
-scripts/download.sh
