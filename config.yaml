@@ -245,3 +245,22 @@ hub:
   model_id: null                      # Repository ID (e.g., "username/tiny-sd-vae")
   private: false                      # Create private repository
   # token: null                       # Use HF_TOKEN env var instead
+
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │                         Evaluation Settings                               │
+# └───────────────────────────────────────────────────────────────────────────┘
+evaluation:
+  metrics: [fid, clip_fid, is, clip_score]
+  num_eval_samples: 1000
+  eval_batch_size: 32
+  eval_num_steps: 50
+  eval_guidance_scale: 7.5
+  eval_seed: 42
+  results_dir: results/evaluation
+
+benchmark:
+  warmup_runs: 3
+  num_steps_list: [10, 25, 50, 100]
+  batch_sizes: [1, 4, 8]
+  benchmark_prompt: "a cat sitting on a couch"
+  results_dir: results/benchmarks

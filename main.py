@@ -30,16 +30,34 @@ def main() -> None:
     )
 
     # Mode arguments
-    parser.add_argument("--train-vae", action="store_true", help="Stage 1: Train VAE (encoder + decoder)")
-    parser.add_argument("--train-diffusion", action="store_true", help="Stage 2: Train Diffusion on latent space")
-    parser.add_argument("--train-motion", action="store_true", help="Stage 3: Train Motion Module for animation")
+    parser.add_argument(
+        "--train-vae", action="store_true", help="Stage 1: Train VAE (encoder + decoder)"
+    )
+    parser.add_argument(
+        "--train-diffusion", action="store_true", help="Stage 2: Train Diffusion on latent space"
+    )
+    parser.add_argument(
+        "--train-motion", action="store_true", help="Stage 3: Train Motion Module for animation"
+    )
     parser.add_argument("--train", action="store_true", help="Train using config.yaml settings")
     parser.add_argument("--generate", action="store_true", help="Generate images from prompts")
-    parser.add_argument("--generate-gif", action="store_true", help="Generate animated GIFs from prompts")
-    parser.add_argument("--reconstruct-vae", action="store_true", help="Reconstruct image through VAE")
-    parser.add_argument("--decode-random", action="store_true", help="Generate images from random latent vectors (VAE decoder only)")
+    parser.add_argument(
+        "--generate-gif", action="store_true", help="Generate animated GIFs from prompts"
+    )
+    parser.add_argument(
+        "--reconstruct-vae", action="store_true", help="Reconstruct image through VAE"
+    )
+    parser.add_argument(
+        "--decode-random",
+        action="store_true",
+        help="Generate images from random latent vectors (VAE decoder only)",
+    )
     parser.add_argument("--demo", action="store_true", help="Run interactive demo")
-    parser.add_argument("--animation-demo", action="store_true", help="Run interactive animation demo")
+    parser.add_argument(
+        "--animation-demo", action="store_true", help="Run interactive animation demo"
+    )
+    parser.add_argument("--evaluate", action="store_true", help="Evaluate with FID/IS/CLIPScore")
+    parser.add_argument("--benchmark", action="store_true", help="Benchmark sampling speed/memory")
 
     # Training arguments
     parser.add_argument("--resume", action="store_true", help="Resume training from checkpoint")
@@ -57,32 +75,91 @@ def main() -> None:
         default=None,
         help="Prompt for generation (use '||' to separate multiple prompts)",
     )
-    parser.add_argument("--input", type=str, default=None, help="Input image path (for --reconstruct-vae)")
-    parser.add_argument("--input-dir", type=str, default=None, help="Input directory for batch VAE reconstruction")
-    parser.add_argument("--output-dir", type=str, default=None, help="Output directory for batch VAE reconstruction")
+    parser.add_argument(
+        "--input", type=str, default=None, help="Input image path (for --reconstruct-vae)"
+    )
+    parser.add_argument(
+        "--input-dir", type=str, default=None, help="Input directory for batch VAE reconstruction"
+    )
+    parser.add_argument(
+        "--output-dir", type=str, default=None, help="Output directory for batch VAE reconstruction"
+    )
     parser.add_argument("--num-samples", type=int, default=1, help="Number of samples to generate")
     parser.add_argument("--steps", type=int, default=50, help="Number of diffusion steps")
     parser.add_argument("--guidance", type=float, default=7.5, help="Guidance scale")
     parser.add_argument("--scaling-factor", type=float, default=None, help="VAE scaling factor")
     parser.add_argument("--output", type=str, default="output.png", help="Output file path")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
-    parser.add_argument("--latent-scale", type=float, default=1.0, help="Scale for random latent vectors")
-    parser.add_argument("--reference-dir", type=str, default=None, help="Reference images dir for latent statistics")
+    parser.add_argument(
+        "--latent-scale", type=float, default=1.0, help="Scale for random latent vectors"
+    )
+    parser.add_argument(
+        "--reference-dir", type=str, default=None, help="Reference images dir for latent statistics"
+    )
 
     # Animation arguments
-    parser.add_argument("--num-frames", type=int, default=16, help="Number of frames for GIF generation")
+    parser.add_argument(
+        "--num-frames", type=int, default=16, help="Number of frames for GIF generation"
+    )
     parser.add_argument("--fps", type=int, default=8, help="Frames per second for GIF")
-    parser.add_argument("--motion-checkpoint", type=str, default=None, help="Path to motion module checkpoint")
+    parser.add_argument(
+        "--motion-checkpoint", type=str, default=None, help="Path to motion module checkpoint"
+    )
+
+    # Evaluation arguments
+    parser.add_argument(
+        "--eval-metrics",
+        type=str,
+        default="fid,clip_fid,is,clip_score",
+        help="Metrics to compute, comma-separated (fid,clip_fid,is,clip_score)",
+    )
+    parser.add_argument(
+        "--num-eval-samples", type=int, default=None, help="Number of samples for evaluation"
+    )
+    parser.add_argument(
+        "--real-images-dir",
+        type=str,
+        default=None,
+        help="Directory with real images for FID computation",
+    )
+    parser.add_argument(
+        "--eval-prompts-file", type=str, default=None, help="JSON file with evaluation prompts"
+    )
+
+    # Benchmark arguments
+    parser.add_argument(
+        "--benchmark-steps",
+        type=str,
+        default=None,
+        help="Comma-separated step counts for benchmark sweep (e.g., '10,25,50,100')",
+    )
+    parser.add_argument(
+        "--benchmark-batch-sizes",
+        type=str,
+        default=None,
+        help="Comma-separated batch sizes for benchmark sweep (e.g., '1,4,8')",
+    )
 
     # Wandb arguments
     parser.add_argument("--wandb", action="store_true", help="Enable wandb logging")
-    parser.add_argument("--wandb-project", type=str, default="tiny-stable-diffusion", help="Wandb project")
+    parser.add_argument(
+        "--wandb-project", type=str, default="tiny-stable-diffusion", help="Wandb project"
+    )
     parser.add_argument("--wandb-run-name", type=str, default=None, help="Wandb run name")
 
     # HuggingFace Hub arguments
-    parser.add_argument("--push-to-hub", action="store_true", help="Push trained model to HuggingFace Hub")
-    parser.add_argument("--hub-model-id", type=str, default=None, help="HuggingFace model ID (e.g., username/model-name)")
-    parser.add_argument("--hub-private", action="store_true", help="Create private repository on HuggingFace Hub")
+    parser.add_argument(
+        "--push-to-hub", action="store_true", help="Push trained model to HuggingFace Hub"
+    )
+    parser.add_argument(
+        "--hub-model-id",
+        type=str,
+        default=None,
+        help="HuggingFace model ID (e.g., username/model-name)",
+    )
+    parser.add_argument(
+        "--hub-private", action="store_true", help="Create private repository on HuggingFace Hub"
+    )
 
     args = parser.parse_args()
 
@@ -121,6 +198,12 @@ def main() -> None:
 
     elif args.animation_demo:
         _run_animation_demo(args)
+
+    elif args.evaluate:
+        _run_evaluation(args)
+
+    elif args.benchmark:
+        _run_benchmark(args)
 
     else:
         parser.print_help()
@@ -444,6 +527,157 @@ def _run_animation_demo(args: argparse.Namespace) -> None:
         diffusion_checkpoint=args.checkpoint,
         motion_checkpoint=args.motion_checkpoint,
     )
+
+
+def _run_evaluation(args: argparse.Namespace) -> None:
+    """Run quantitative evaluation (FID/IS/CLIPScore)."""
+    import json
+
+    from src.config import get_config
+    from src.evaluation.diffusion_evaluator import (
+        evaluate_diffusion,
+        format_evaluation_results,
+    )
+
+    # Load eval config defaults
+    try:
+        config = get_config("evaluation")
+    except Exception:
+        config = {}
+
+    # Load diffusion_train config for dataset defaults
+    try:
+        diffusion_config = get_config("diffusion_train")
+    except Exception:
+        diffusion_config = {}
+
+    metrics = args.eval_metrics.split(",")
+    num_eval_samples = (
+        args.num_eval_samples
+        if args.num_eval_samples is not None
+        else config.get("num_eval_samples", 1000)
+    )
+    eval_batch_size = config.get("eval_batch_size", 32)
+    eval_num_steps = args.steps  # argparse default: 50
+    eval_guidance = args.guidance  # argparse default: 7.5
+    eval_seed = args.seed if args.seed is not None else config.get("eval_seed", 42)
+    results_dir = config.get("results_dir", "results/evaluation")
+    save_path = Path(results_dir) / "eval_results.json"
+
+    # Dataset: use --dataset or fall back to diffusion_train.dataset_name
+    dataset_name = args.dataset or diffusion_config.get("dataset_name")
+    image_field = diffusion_config.get("image_field", "jpg")
+    caption_field = diffusion_config.get("caption_field", "txt")
+    use_webdataset = diffusion_config.get("use_webdataset", False)
+
+    # Load prompts
+    prompts = None
+    if args.eval_prompts_file is not None:
+        with open(args.eval_prompts_file) as f:
+            prompts = json.load(f)
+    elif args.prompt is not None:
+        prompts = _parse_prompts(args.prompt)
+
+    result = evaluate_diffusion(
+        checkpoint=args.checkpoint,
+        vae_checkpoint=args.vae_checkpoint,
+        prompts=prompts,
+        real_images_dir=args.real_images_dir,
+        dataset_name=dataset_name,
+        num_eval_samples=num_eval_samples,
+        num_steps=eval_num_steps,
+        guidance_scale=eval_guidance,
+        metrics=metrics,
+        seed=eval_seed,
+        eval_batch_size=eval_batch_size,
+        save_results=str(save_path),
+        image_field=image_field,
+        caption_field=caption_field,
+        use_webdataset=use_webdataset,
+    )
+
+    print(format_evaluation_results(result))
+
+
+def _run_benchmark(args: argparse.Namespace) -> None:
+    """Run sampling speed/memory benchmark."""
+    import json
+
+    from src.config import get_config
+    from src.evaluation.benchmark import (
+        benchmark_generation,
+        benchmark_sweep,
+        format_benchmark_results,
+    )
+
+    # Load benchmark config defaults
+    try:
+        config = get_config("benchmark")
+    except Exception:
+        config = {}
+
+    warmup_runs = config.get("warmup_runs", 3)
+    prompt = config.get("benchmark_prompt", "a cat sitting on a couch")
+    results_dir = config.get("results_dir", "results/benchmarks")
+
+    if args.prompt is not None:
+        prompt = args.prompt.split("||")[0].strip()
+
+    # Determine if sweep or single run
+    if args.benchmark_steps is not None or args.benchmark_batch_sizes is not None:
+        # Sweep mode
+        steps_list = (
+            [int(s) for s in args.benchmark_steps.split(",")]
+            if args.benchmark_steps
+            else config.get("num_steps_list", [10, 25, 50, 100])
+        )
+        batch_sizes = (
+            [int(b) for b in args.benchmark_batch_sizes.split(",")]
+            if args.benchmark_batch_sizes
+            else config.get("batch_sizes", [1, 4, 8])
+        )
+
+        results = benchmark_sweep(
+            checkpoint=args.checkpoint,
+            vae_checkpoint=args.vae_checkpoint,
+            prompt=prompt,
+            num_steps_list=steps_list,
+            batch_sizes=batch_sizes,
+            warmup_runs=warmup_runs,
+        )
+
+        # Find a good detail result (middle steps, batch=1)
+        detail = None
+        for r in results:
+            if r.batch_size == 1:
+                detail = r
+        if detail is None and results:
+            detail = results[0]
+
+        print(format_benchmark_results(results, detail_result=detail))
+    else:
+        # Single run
+        result = benchmark_generation(
+            checkpoint=args.checkpoint,
+            vae_checkpoint=args.vae_checkpoint,
+            prompt=prompt,
+            num_steps=args.steps,
+            batch_size=args.batch_size or 1,
+            warmup_runs=warmup_runs,
+        )
+
+        print(format_benchmark_results([result], detail_result=result))
+
+    # Save results
+    save_path = Path(results_dir) / "benchmark_results.json"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    if args.benchmark_steps is not None or args.benchmark_batch_sizes is not None:
+        results_data = [r.to_dict() for r in results]
+    else:
+        results_data = [result.to_dict()]
+    with open(save_path, "w") as f:
+        json.dump(results_data, f, indent=2)
+    print(f"\nResults saved to {save_path}")
 
 
 if __name__ == "__main__":
