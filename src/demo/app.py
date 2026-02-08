@@ -6,6 +6,10 @@ Run with:
 
 from __future__ import annotations
 
+import json
+import os
+from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
 import streamlit as st
@@ -14,48 +18,210 @@ import torchvision.transforms as T
 from PIL import Image
 
 from src.config import get_config
-from src.models.diffusion import Diffusion
 from src.models.animated_diffusion import AnimatedDiffusion
+from src.models.animated_mmdit import load_animated_mmdit
+from src.models.diffusion import Diffusion
 from src.models.factory import DiT
 from src.models.vae import create_vae
-from src.models.animated_mmdit import load_animated_mmdit
 from src.text_encoder.clip_encoder import CLIPTextEncoder
 from src.training.checkpoint import find_latest_checkpoint
 from src.utils.common import get_device
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+CHECKPOINT_DIR = Path("checkpoints")
+
+_CUSTOM_CSS = """
+<style>
+div[data-testid="stMetric"] {
+    background-color: #f0f2f6;
+    border-radius: 8px;
+    padding: 12px 16px;
+}
+div[data-testid="stMetric"] > div {
+    overflow: hidden;
+}
+</style>
+"""
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint scanning utilities
+# ---------------------------------------------------------------------------
+
+def _format_bytes(size: int) -> str:
+    """Format byte size into a human-readable string."""
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def _format_mtime(mtime: float) -> str:
+    """Format modification timestamp to a readable date string."""
+    return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+
+
+def scan_checkpoints(
+    checkpoint_dir: Path, prefix: str
+) -> list[dict[str, str | int | float]]:
+    """Scan checkpoint directory for files matching *prefix*.
+
+    Returns file-level metadata only (no torch.load) sorted by mtime desc.
+    """
+    if not checkpoint_dir.exists():
+        return []
+
+    results = []
+    for p in checkpoint_dir.glob(f"{prefix}*.pt"):
+        stat = p.stat()
+        results.append({
+            "path": str(p),
+            "name": p.name,
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+            "display": f"{p.name}  ({_format_bytes(stat.st_size)}, {_format_mtime(stat.st_mtime)})",
+        })
+
+    return sorted(results, key=lambda d: d["mtime"], reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Sidebar: checkpoint selectors
+# ---------------------------------------------------------------------------
+
+def _checkpoint_selectbox(
+    label: str,
+    prefix: str,
+    session_key: str,
+) -> Path | None:
+    """Render a selectbox for checkpoint files and persist selection."""
+    candidates = scan_checkpoints(CHECKPOINT_DIR, prefix)
+    if not candidates:
+        st.sidebar.warning(f"No {prefix} checkpoints found.")
+        return None
+
+    options = [c["display"] for c in candidates]
+    current = st.session_state.get(session_key)
+
+    # Resolve index from session state
+    idx = 0
+    if current:
+        for i, c in enumerate(candidates):
+            if c["path"] == current:
+                idx = i
+                break
+
+    selection = st.sidebar.selectbox(label, options, index=idx, key=f"_sel_{session_key}")
+    selected_idx = options.index(selection)
+    selected_path = candidates[selected_idx]["path"]
+    st.session_state[session_key] = selected_path
+
+    return Path(selected_path)
+
+
+def render_sidebar_checkpoints() -> None:
+    """Render checkpoint selection widgets in the sidebar."""
+    st.sidebar.markdown("### Checkpoints")
+
+    _checkpoint_selectbox("VAE Checkpoint", "vae", "vae_checkpoint")
+    _checkpoint_selectbox("Diffusion Checkpoint", "diffusion", "diffusion_checkpoint")
+    _checkpoint_selectbox("Motion Checkpoint", "motion", "motion_checkpoint")
+
+    st.sidebar.divider()
+
+
+def render_sidebar_system_info() -> None:
+    """Display device / system info badge in the sidebar."""
+    device = get_device("auto")
+    device_label = str(device).upper()
+    if "cuda" in str(device):
+        gpu_name = torch.cuda.get_device_name(0)
+        device_label = f"CUDA ({gpu_name})"
+    elif "mps" in str(device):
+        device_label = "Apple MPS"
+
+    st.sidebar.markdown("### System")
+    st.sidebar.info(f"**Device:** {device_label}  \n**PyTorch:** {torch.__version__}")
+    st.sidebar.divider()
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint path helpers (read from session_state, fallback to auto-detect)
+# ---------------------------------------------------------------------------
 
 def get_vae_checkpoint_path() -> Path | None:
-    """Find available VAE checkpoint."""
+    """Return user-selected VAE checkpoint path or auto-detect."""
+    selected = st.session_state.get("vae_checkpoint")
+    if selected and Path(selected).exists():
+        return Path(selected)
+
     checkpoint = find_latest_checkpoint("checkpoints", prefix="vae")
-    if checkpoint is None:
-        default_path = Path("checkpoints/vae.pt")
-        if default_path.exists():
-            return default_path
-        return None
-    return Path(checkpoint)
+    if checkpoint is not None:
+        return Path(checkpoint)
+
+    default_path = Path("checkpoints/vae.pt")
+    return default_path if default_path.exists() else None
 
 
 def get_diffusion_checkpoint_path() -> Path | None:
-    """Find available diffusion checkpoint."""
+    """Return user-selected diffusion checkpoint path or auto-detect."""
+    selected = st.session_state.get("diffusion_checkpoint")
+    if selected and Path(selected).exists():
+        return Path(selected)
+
     checkpoint = find_latest_checkpoint("checkpoints", prefix="diffusion")
-    if checkpoint is None:
-        default_path = Path("checkpoints/diffusion.pt")
-        if default_path.exists():
-            return default_path
-        return None
-    return Path(checkpoint)
+    if checkpoint is not None:
+        return Path(checkpoint)
+
+    default_path = Path("checkpoints/diffusion.pt")
+    return default_path if default_path.exists() else None
 
 
 def get_motion_checkpoint_path() -> Path | None:
-    """Find available motion checkpoint."""
-    checkpoint = find_latest_checkpoint("checkpoints", prefix="motion")
-    if checkpoint is None:
-        default_path = Path("checkpoints/motion.pt")
-        if default_path.exists():
-            return default_path
-        return None
-    return Path(checkpoint)
+    """Return user-selected motion checkpoint path or auto-detect."""
+    selected = st.session_state.get("motion_checkpoint")
+    if selected and Path(selected).exists():
+        return Path(selected)
 
+    checkpoint = find_latest_checkpoint("checkpoints", prefix="motion")
+    if checkpoint is not None:
+        return Path(checkpoint)
+
+    default_path = Path("checkpoints/motion.pt")
+    return default_path if default_path.exists() else None
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint info display
+# ---------------------------------------------------------------------------
+
+def show_checkpoint_info(ckpt: dict, label: str = "Checkpoint Info") -> None:
+    """Display model config from a loaded checkpoint in an expander."""
+    model_config = ckpt.get("model_config", ckpt.get("config", {}))
+    if not model_config:
+        return
+
+    with st.expander(f"**{label}**", expanded=False):
+        cols = st.columns(4)
+        cols[0].metric("Model Type", model_config.get("model_type", "n/a"))
+        cols[1].metric("Model Size", model_config.get("model_size", "n/a"))
+        cols[2].metric("Epoch", model_config.get("epoch", "n/a"))
+        cols[3].metric(
+            "Loss",
+            f"{model_config.get('loss', 'n/a'):.4f}"
+            if isinstance(model_config.get("loss"), (int, float))
+            else "n/a",
+        )
+
+        st.code(json.dumps(model_config, indent=2, default=str), language="json")
+
+
+# ---------------------------------------------------------------------------
+# Model loading (cached)
+# ---------------------------------------------------------------------------
 
 @st.cache_resource
 def load_vae(checkpoint_path: str):
@@ -76,7 +242,7 @@ def load_vae(checkpoint_path: str):
     vae = vae.to(device)
     vae.eval()
 
-    return vae, image_size, device
+    return vae, image_size, device, ckpt
 
 
 @st.cache_resource
@@ -84,17 +250,14 @@ def load_diffusion_models(checkpoint_path: str):
     """Load diffusion model, VAE decoder, and CLIP encoder (cached)."""
     device = get_device("auto")
 
-    # Load CLIP encoder
     clip_encoder = CLIPTextEncoder()
     clip_encoder = clip_encoder.to(device)
     clip_encoder.eval()
 
-    # Compute unconditional embedding
     with torch.no_grad():
         uncond_embed = clip_encoder.encode([""])
     uncond_embed = uncond_embed.to(device)
 
-    # Load diffusion checkpoint
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model_config = ckpt.get("model_config", ckpt.get("config", {}))
 
@@ -107,7 +270,6 @@ def load_diffusion_models(checkpoint_path: str):
     in_channels = model_config.get("in_channels", 16)
     image_size = model_config.get("image_size", 64)
 
-    # Load VAE for decoding
     vae_checkpoint = model_config.get("vae_checkpoint", "checkpoints/vae.pt")
     if not Path(vae_checkpoint).exists():
         raise FileNotFoundError(f"VAE checkpoint not found: {vae_checkpoint}")
@@ -123,7 +285,6 @@ def load_diffusion_models(checkpoint_path: str):
     vae = vae.to(device)
     vae.eval()
 
-    # Load DiT model
     model = DiT(
         in_channels=in_channels,
         image_size=latent_size,
@@ -147,6 +308,7 @@ def load_diffusion_models(checkpoint_path: str):
         "latent_size": latent_size,
         "in_channels": in_channels,
         "image_size": image_size,
+        "ckpt": ckpt,
     }
 
 
@@ -158,17 +320,14 @@ def load_animation_models(
     """Load AnimatedMMDiT model for GIF generation (cached)."""
     device = get_device("auto")
 
-    # Load CLIP encoder
     clip_encoder = CLIPTextEncoder()
     clip_encoder = clip_encoder.to(device)
     clip_encoder.eval()
 
-    # Compute unconditional embedding
     with torch.no_grad():
         uncond_embed = clip_encoder.encode([""])
     uncond_embed = uncond_embed.to(device)
 
-    # Load VAE for decoding
     diffusion_ckpt = torch.load(
         diffusion_checkpoint_path, map_location=device, weights_only=False
     )
@@ -192,7 +351,6 @@ def load_animation_models(
     vae = vae.to(device)
     vae.eval()
 
-    # Load AnimatedMMDiT
     model = load_animated_mmdit(
         base_checkpoint_path=diffusion_checkpoint_path,
         motion_checkpoint_path=motion_checkpoint_path,
@@ -216,328 +374,389 @@ def load_animation_models(
         "latent_size": latent_size,
         "in_channels": in_channels,
         "image_size": image_size,
+        "ckpt": diffusion_ckpt,
     }
 
+
+# ---------------------------------------------------------------------------
+# Pages
+# ---------------------------------------------------------------------------
 
 def vae_reconstruction_page():
     """VAE reconstruction demo page."""
     st.header("VAE Reconstruction")
-    st.write("Upload an image to see how the VAE encodes and reconstructs it.")
+    st.caption("Upload an image to see how the VAE encodes and reconstructs it.")
 
-    # Check for VAE checkpoint
     vae_path = get_vae_checkpoint_path()
     if vae_path is None:
-        st.error("VAE checkpoint not found. Please train a VAE first:")
-        st.code("uv run main.py --train-vae --epochs 100")
-        return
+        st.error(
+            "**No VAE checkpoint found.**  \n"
+            "Train a VAE first:  \n"
+            "`uv run main.py --train-vae --epochs 100`"
+        )
+        st.stop()
 
-    st.success(f"VAE checkpoint: `{vae_path}`")
+    with st.status("Loading VAE model...", expanded=False) as status:
+        try:
+            vae, image_size, device, ckpt = load_vae(str(vae_path))
+            status.update(label=f"VAE loaded from `{vae_path.name}`", state="complete")
+        except Exception as e:
+            status.update(label="Failed to load VAE", state="error")
+            st.error(f"Could not load VAE checkpoint `{vae_path.name}`:  \n{e}")
+            st.stop()
 
-    # Load VAE
-    try:
-        vae, image_size, device = load_vae(str(vae_path))
-    except Exception as e:
-        st.error(f"Failed to load VAE: {e}")
-        return
+    show_checkpoint_info(ckpt, label="VAE Checkpoint Info")
 
-    st.info(f"Device: **{device}** | Image size: **{image_size}x{image_size}**")
+    st.divider()
 
-    # File uploader
     uploaded_file = st.file_uploader(
         "Upload an image",
         type=["png", "jpg", "jpeg", "webp"],
         help="Upload an image to reconstruct through the VAE",
     )
 
-    if uploaded_file is not None:
-        # Load image
-        original_img = Image.open(uploaded_file).convert("RGB")
+    if uploaded_file is None:
+        return
 
-        col1, col2 = st.columns(2)
+    original_img = Image.open(uploaded_file).convert("RGB")
 
-        with col1:
-            st.subheader("Original")
-            st.image(original_img, use_container_width=True)
+    col1, col2 = st.columns(2)
 
-        # Reconstruct
-        with st.spinner("Reconstructing..."):
-            transform = T.Compose([
-                T.Resize((image_size, image_size)),
-                T.ToTensor(),
-                T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-            ])
-            x = transform(original_img).unsqueeze(0).to(device)
+    with col1:
+        st.subheader("Original")
+        st.image(original_img, use_container_width=True)
 
-            with torch.no_grad():
-                mean, logvar = vae.encode(x)
-                recon = vae.decode(mean)
+    with st.spinner("Encoding & decoding through VAE..."):
+        transform = T.Compose([
+            T.Resize((image_size, image_size)),
+            T.ToTensor(),
+            T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+        ])
+        x = transform(original_img).unsqueeze(0).to(device)
 
-            # Post-process
-            recon = (recon + 1) / 2
-            recon = recon.clamp(0, 1)
-            recon = recon[0].permute(1, 2, 0).cpu().numpy()
-            recon = (recon * 255).astype("uint8")
-            recon_img = Image.fromarray(recon)
+        with torch.no_grad():
+            mean, logvar = vae.encode(x)
+            recon = vae.decode(mean)
 
-        with col2:
-            st.subheader("Reconstructed")
-            st.image(recon_img, use_container_width=True)
+        recon_tensor = (recon + 1) / 2
+        recon_tensor = recon_tensor.clamp(0, 1)
+        recon_np = recon_tensor[0].permute(1, 2, 0).cpu().numpy()
+        recon_np = (recon_np * 255).astype("uint8")
+        recon_img = Image.fromarray(recon_np)
 
-        # Show latent space info
-        with st.expander("Latent Space Info"):
-            st.write(f"Latent shape: `{mean.shape}`")
-            st.write(f"Latent mean: `{mean.mean().item():.4f}`")
-            st.write(f"Latent std: `{mean.std().item():.4f}`")
+    with col2:
+        st.subheader("Reconstructed")
+        st.image(recon_img, use_container_width=True)
+
+    st.divider()
+
+    # Compression metrics
+    info_tab, latent_tab = st.tabs(["Compression Metrics", "Latent Details"])
+
+    with info_tab:
+        m1, m2, m3 = st.columns(3)
+        input_pixels = image_size * image_size * 3
+        latent_elements = mean.shape[1] * mean.shape[2] * mean.shape[3]
+        ratio = input_pixels / latent_elements
+        m1.metric("Input Pixels", f"{input_pixels:,}")
+        m2.metric("Latent Elements", f"{latent_elements:,}")
+        m3.metric("Compression Ratio", f"{ratio:.1f}x")
+
+    with latent_tab:
+        st.write(f"**Shape:** `{list(mean.shape)}`")
+        st.write(f"**Mean:** `{mean.mean().item():.4f}`")
+        st.write(f"**Std:** `{mean.std().item():.4f}`")
+        st.write(f"**Min:** `{mean.min().item():.4f}`")
+        st.write(f"**Max:** `{mean.max().item():.4f}`")
 
 
 def diffusion_generation_page():
     """Diffusion generation demo page."""
     st.header("Text-to-Image Generation")
-    st.write("Generate images from text prompts using the trained diffusion model.")
+    st.caption("Generate images from text prompts using the trained diffusion model.")
 
-    # Check for diffusion checkpoint
     diffusion_path = get_diffusion_checkpoint_path()
     if diffusion_path is None:
-        st.error("Diffusion checkpoint not found. Please train a diffusion model first:")
-        st.code("uv run main.py --train-diffusion --epochs 200")
-        return
-
-    st.success(f"Diffusion checkpoint: `{diffusion_path}`")
-
-    # Load models
-    try:
-        models = load_diffusion_models(str(diffusion_path))
-    except FileNotFoundError as e:
-        st.error(str(e))
-        return
-    except Exception as e:
-        st.error(f"Failed to load models: {e}")
-        return
-
-    st.info(
-        f"Device: **{models['device']}** | "
-        f"Image size: **{models['image_size']}x{models['image_size']}**"
-    )
-
-    # Input controls
-    prompt = st.text_input(
-        "Prompt",
-        value="a photo of a cat",
-        help="Enter a text description of the image you want to generate",
-    )
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        num_steps = st.slider("Sampling Steps", 10, 100, 50, help="More steps = better quality")
-    with col2:
-        guidance_scale = st.slider(
-            "Guidance Scale", 1.0, 20.0, 7.5, help="Higher = more faithful to prompt"
+        st.error(
+            "**No diffusion checkpoint found.**  \n"
+            "Train a diffusion model first:  \n"
+            "`uv run main.py --train-diffusion --epochs 200`"
         )
-    with col3:
-        seed = st.number_input("Seed", value=42, min_value=0, help="Random seed for reproducibility")
+        st.stop()
 
-    # Generate button
-    if st.button("Generate", type="primary", use_container_width=True):
-        if not prompt.strip():
-            st.warning("Please enter a prompt.")
-            return
+    with st.status("Loading diffusion model...", expanded=False) as status:
+        try:
+            models = load_diffusion_models(str(diffusion_path))
+            status.update(
+                label=f"Diffusion model loaded from `{diffusion_path.name}`",
+                state="complete",
+            )
+        except FileNotFoundError as e:
+            status.update(label="Missing dependency", state="error")
+            st.error(f"**Missing checkpoint:**  \n{e}")
+            st.stop()
+        except Exception as e:
+            status.update(label="Failed to load model", state="error")
+            st.error(f"Could not load diffusion model `{diffusion_path.name}`:  \n{e}")
+            st.stop()
 
-        with st.spinner(f"Generating with {num_steps} steps..."):
-            # Set seed
-            torch.manual_seed(seed)
+    show_checkpoint_info(models["ckpt"], label="Diffusion Checkpoint Info")
 
-            # Initialize diffusion
-            diffusion = Diffusion(
-                num_timesteps=1000,
-                beta_schedule="cosine",
-                guidance_scale=guidance_scale,
-                uncond_embed=models["uncond_embed"],
+    st.divider()
+
+    # Generation controls in a form
+    with st.form("diffusion_form"):
+        prompt = st.text_input(
+            "Prompt",
+            value="a photo of a cat",
+            help="Enter a text description of the image you want to generate",
+        )
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            num_steps = st.slider(
+                "Sampling Steps", 10, 100, 50, help="More steps = better quality"
+            )
+        with col2:
+            guidance_scale = st.slider(
+                "Guidance Scale", 1.0, 20.0, 7.5, help="Higher = more faithful to prompt"
+            )
+        with col3:
+            seed = st.number_input(
+                "Seed", value=42, min_value=0, help="Random seed for reproducibility"
             )
 
-            # Encode prompt
-            text_embeds = models["clip_encoder"].encode([prompt])
-            text_embeds = text_embeds.to(models["device"])
-
-            # Generate
-            with torch.no_grad():
-                images = diffusion.sample(
-                    model=models["model"],
-                    shape=(1, models["in_channels"], models["latent_size"], models["latent_size"]),
-                    text_embeds=text_embeds,
-                    num_steps=num_steps,
-                    use_ddim=True,
-                    use_cfg=True,
-                    vae_decoder=models["vae"],
-                )
-
-            # Convert to PIL
-            img = images[0]
-            img = img.permute(1, 2, 0).mul(255).clamp(0, 255).to(torch.uint8).cpu().numpy()
-            pil_img = Image.fromarray(img)
-
-        # Display result
-        st.subheader("Generated Image")
-        st.image(pil_img, use_container_width=True)
-
-        # Download button
-        from io import BytesIO
-
-        buf = BytesIO()
-        pil_img.save(buf, format="PNG")
-        st.download_button(
-            label="Download Image",
-            data=buf.getvalue(),
-            file_name=f"generated_{prompt[:20].replace(' ', '_')}.png",
-            mime="image/png",
+        submitted = st.form_submit_button(
+            "Generate", type="primary", use_container_width=True
         )
+
+    if not submitted:
+        return
+
+    if not prompt.strip():
+        st.warning("Please enter a prompt.")
+        st.stop()
+
+    with st.spinner(f"Generating with {num_steps} DDIM steps..."):
+        torch.manual_seed(seed)
+
+        diffusion = Diffusion(
+            num_timesteps=1000,
+            beta_schedule="cosine",
+            guidance_scale=guidance_scale,
+            uncond_embed=models["uncond_embed"],
+        )
+
+        text_embeds = models["clip_encoder"].encode([prompt])
+        text_embeds = text_embeds.to(models["device"])
+
+        with torch.no_grad():
+            images = diffusion.sample(
+                model=models["model"],
+                shape=(
+                    1,
+                    models["in_channels"],
+                    models["latent_size"],
+                    models["latent_size"],
+                ),
+                text_embeds=text_embeds,
+                num_steps=num_steps,
+                use_ddim=True,
+                use_cfg=True,
+                vae_decoder=models["vae"],
+            )
+
+        img = images[0]
+        img = img.permute(1, 2, 0).mul(255).clamp(0, 255).to(torch.uint8).cpu().numpy()
+        pil_img = Image.fromarray(img)
+
+    st.subheader("Generated Image")
+    st.image(pil_img, use_container_width=True)
+
+    # Generation settings & download
+    with st.expander("Generation Settings"):
+        st.json({
+            "prompt": prompt,
+            "steps": num_steps,
+            "guidance_scale": guidance_scale,
+            "seed": seed,
+            "checkpoint": diffusion_path.name,
+        })
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_prompt = prompt[:20].replace(" ", "_")
+    buf = BytesIO()
+    pil_img.save(buf, format="PNG")
+    st.download_button(
+        label="Download Image",
+        data=buf.getvalue(),
+        file_name=f"generated_{safe_prompt}_{timestamp}.png",
+        mime="image/png",
+    )
 
 
 def gif_generation_page():
     """GIF generation demo page."""
     st.header("GIF Generation")
-    st.write("Generate animated GIFs from text prompts using the Motion Module.")
+    st.caption("Generate animated GIFs from text prompts using the Motion Module.")
 
-    # Check for diffusion checkpoint
     diffusion_path = get_diffusion_checkpoint_path()
     if diffusion_path is None:
-        st.error("Diffusion checkpoint not found. Please train a diffusion model first:")
-        st.code("uv run main.py --train-diffusion --epochs 200")
-        return
+        st.error(
+            "**No diffusion checkpoint found.**  \n"
+            "Train a diffusion model first:  \n"
+            "`uv run main.py --train-diffusion --epochs 200`"
+        )
+        st.stop()
 
-    # Check for motion checkpoint (optional)
     motion_path = get_motion_checkpoint_path()
     if motion_path is None:
         st.warning(
-            "Motion checkpoint not found. Using untrained motion module. "
-            "For better results, train with:\n"
+            "Motion checkpoint not found. Using untrained motion module.  \n"
+            "For better results, train with:  \n"
             "`uv run main.py --train-motion --epochs 50`"
         )
 
-    st.success(f"Diffusion checkpoint: `{diffusion_path}`")
-    if motion_path:
-        st.success(f"Motion checkpoint: `{motion_path}`")
+    with st.status("Loading animation models...", expanded=False) as status:
+        try:
+            models = load_animation_models(
+                str(diffusion_path),
+                str(motion_path) if motion_path else None,
+            )
+            loaded_label = f"Models loaded (diffusion: `{diffusion_path.name}`"
+            if motion_path:
+                loaded_label += f", motion: `{motion_path.name}`"
+            loaded_label += ")"
+            status.update(label=loaded_label, state="complete")
+        except FileNotFoundError as e:
+            status.update(label="Missing dependency", state="error")
+            st.error(f"**Missing checkpoint:**  \n{e}")
+            st.stop()
+        except Exception as e:
+            status.update(label="Failed to load models", state="error")
+            st.error(f"Could not load animation models:  \n{e}")
+            st.stop()
 
-    # Load models
-    try:
-        models = load_animation_models(
-            str(diffusion_path),
-            str(motion_path) if motion_path else None,
+    show_checkpoint_info(models["ckpt"], label="Diffusion Checkpoint Info")
+
+    st.divider()
+
+    # Generation controls in a form
+    with st.form("gif_form"):
+        prompt = st.text_input(
+            "Prompt",
+            value="a cat walking",
+            help="Enter a text description of the animation you want to generate",
         )
-    except FileNotFoundError as e:
-        st.error(str(e))
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            num_frames = st.slider("Frames", 4, 32, 16, help="Number of animation frames")
+        with col2:
+            num_steps = st.slider("Steps", 10, 100, 50, help="Diffusion sampling steps")
+        with col3:
+            guidance_scale = st.slider("Guidance", 1.0, 20.0, 7.5, help="CFG scale")
+        with col4:
+            fps = st.slider("FPS", 4, 24, 8, help="Frames per second")
+
+        seed = st.number_input("Seed", value=42, min_value=0, help="Random seed")
+
+        submitted = st.form_submit_button(
+            "Generate GIF", type="primary", use_container_width=True
+        )
+
+    if not submitted:
         return
-    except Exception as e:
-        st.error(f"Failed to load models: {e}")
-        return
 
-    st.info(
-        f"Device: **{models['device']}** | "
-        f"Image size: **{models['image_size']}x{models['image_size']}**"
-    )
+    if not prompt.strip():
+        st.warning("Please enter a prompt.")
+        st.stop()
 
-    # Input controls
-    prompt = st.text_input(
-        "Prompt",
-        value="a cat walking",
-        help="Enter a text description of the animation you want to generate",
-    )
+    with st.spinner(f"Generating {num_frames} frames with {num_steps} steps..."):
+        torch.manual_seed(seed)
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        num_frames = st.slider("Frames", 4, 32, 16, help="Number of animation frames")
-    with col2:
-        num_steps = st.slider("Steps", 10, 100, 50, help="Diffusion steps")
-    with col3:
-        guidance_scale = st.slider("Guidance", 1.0, 20.0, 7.5, help="CFG scale")
-    with col4:
-        fps = st.slider("FPS", 4, 24, 8, help="Frames per second")
+        diffusion = AnimatedDiffusion(
+            num_timesteps=1000,
+            num_frames=num_frames,
+            guidance_scale=guidance_scale,
+            uncond_embed=models["uncond_embed"],
+        )
 
-    seed = st.number_input("Seed", value=42, min_value=0, help="Random seed")
+        text_embeds = models["clip_encoder"].encode([prompt])
+        text_embeds = text_embeds.to(models["device"])
 
-    # Generate button
-    if st.button("Generate GIF", type="primary", use_container_width=True):
-        if not prompt.strip():
-            st.warning("Please enter a prompt.")
-            return
-
-        with st.spinner(f"Generating {num_frames} frames with {num_steps} steps..."):
-            # Set seed
-            torch.manual_seed(seed)
-
-            # Initialize diffusion
-            diffusion = AnimatedDiffusion(
-                num_timesteps=1000,
+        with torch.no_grad():
+            video = diffusion.sample_video(
+                model=models["model"],
+                batch_size=1,
                 num_frames=num_frames,
-                guidance_scale=guidance_scale,
-                uncond_embed=models["uncond_embed"],
+                latent_channels=models["in_channels"],
+                latent_size=models["latent_size"],
+                text_embeds=text_embeds,
+                num_steps=num_steps,
+                use_cfg=True,
+                vae_decoder=models["vae"],
+                device=models["device"],
             )
 
-            # Encode prompt
-            text_embeds = models["clip_encoder"].encode([prompt])
-            text_embeds = text_embeds.to(models["device"])
+        video = video[0]  # (F, 3, H, W)
+        frames = []
+        for i in range(video.shape[0]):
+            frame = video[i]
+            frame = frame.permute(1, 2, 0).mul(255).clamp(0, 255)
+            frame = frame.to(torch.uint8).cpu().numpy()
+            frames.append(Image.fromarray(frame))
 
-            # Generate video
-            with torch.no_grad():
-                video = diffusion.sample_video(
-                    model=models["model"],
-                    batch_size=1,
-                    num_frames=num_frames,
-                    latent_channels=models["in_channels"],
-                    latent_size=models["latent_size"],
-                    text_embeds=text_embeds,
-                    num_steps=num_steps,
-                    use_cfg=True,
-                    vae_decoder=models["vae"],
-                    device=models["device"],
-                )
+    # Frame preview grid before full animation
+    st.subheader("Frame Preview")
+    preview_count = min(8, len(frames))
+    preview_cols = st.columns(preview_count)
+    step = max(1, len(frames) // preview_count)
+    for i in range(preview_count):
+        idx = min(i * step, len(frames) - 1)
+        preview_cols[i].image(frames[idx], caption=f"#{idx + 1}", use_container_width=True)
 
-            # Convert to PIL Images
-            video = video[0]  # (F, 3, H, W)
-            frames = []
-            for i in range(video.shape[0]):
-                frame = video[i]  # (3, H, W)
-                frame = frame.permute(1, 2, 0).mul(255).clamp(0, 255)
-                frame = frame.to(torch.uint8).cpu().numpy()
-                frames.append(Image.fromarray(frame))
+    st.divider()
 
-        # Display result
-        st.subheader("Generated GIF")
+    # Assembled GIF
+    st.subheader("Generated GIF")
 
-        # Create GIF in memory
-        from io import BytesIO
+    gif_buffer = BytesIO()
+    duration = int(1000 / fps)
 
-        gif_buffer = BytesIO()
-        duration = int(1000 / fps)  # milliseconds per frame
+    frames[0].save(
+        gif_buffer,
+        format="GIF",
+        save_all=True,
+        append_images=frames[1:],
+        duration=duration,
+        loop=0,
+        optimize=True,
+    )
+    gif_buffer.seek(0)
 
-        frames[0].save(
-            gif_buffer,
-            format="GIF",
-            save_all=True,
-            append_images=frames[1:],
-            duration=duration,
-            loop=0,
-            optimize=True,
-        )
-        gif_buffer.seek(0)
+    st.image(gif_buffer, use_container_width=True)
 
-        # Display GIF
-        st.image(gif_buffer, use_container_width=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_prompt = prompt[:20].replace(" ", "_")
+    gif_buffer.seek(0)
+    st.download_button(
+        label="Download GIF",
+        data=gif_buffer.getvalue(),
+        file_name=f"generated_{safe_prompt}_{timestamp}.gif",
+        mime="image/gif",
+    )
 
-        # Download button
-        gif_buffer.seek(0)
-        st.download_button(
-            label="Download GIF",
-            data=gif_buffer.getvalue(),
-            file_name=f"generated_{prompt[:20].replace(' ', '_')}.gif",
-            mime="image/gif",
-        )
+    # All frames
+    with st.expander("View All Frames"):
+        cols = st.columns(min(4, num_frames))
+        for i, frame in enumerate(frames):
+            cols[i % 4].image(frame, caption=f"Frame {i + 1}")
 
-        # Show individual frames in expander
-        with st.expander("View Individual Frames"):
-            cols = st.columns(min(4, num_frames))
-            for i, frame in enumerate(frames):
-                cols[i % 4].image(frame, caption=f"Frame {i + 1}")
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
     """Main Streamlit app."""
@@ -545,35 +764,38 @@ def main():
         page_title="tiny-stable-diffusion Demo",
         page_icon="🎨",
         layout="wide",
+        initial_sidebar_state="expanded",
     )
 
-    st.title("tiny-stable-diffusion Demo")
-    st.markdown("An educational implementation of Stable Diffusion 3 from scratch.")
+    st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
 
-    # Sidebar navigation
+    st.title("tiny-stable-diffusion Demo")
+    st.caption("An educational implementation of Stable Diffusion 3 from scratch.")
+
+    # -- Sidebar --
     st.sidebar.title("Navigation")
     page = st.sidebar.radio(
         "Select Demo",
         ["VAE Reconstruction", "Text-to-Image Generation", "GIF Generation"],
         help="Choose which model to demo",
     )
+    st.sidebar.divider()
 
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("""
-    **Quick Start:**
-    ```bash
-    # Train VAE
-    uv run main.py --train-vae
+    render_sidebar_checkpoints()
+    render_sidebar_system_info()
 
-    # Train Diffusion
-    uv run main.py --train-diffusion
+    st.sidebar.markdown("### Quick Start")
+    st.sidebar.code(
+        "# Train VAE\n"
+        "uv run main.py --train-vae\n\n"
+        "# Train Diffusion\n"
+        "uv run main.py --train-diffusion\n\n"
+        "# Train Motion (for GIF)\n"
+        "uv run main.py --train-motion",
+        language="bash",
+    )
 
-    # Train Motion (for GIF)
-    uv run main.py --train-motion
-    ```
-    """)
-
-    # Route to selected page
+    # -- Route to selected page --
     if page == "VAE Reconstruction":
         vae_reconstruction_page()
     elif page == "Text-to-Image Generation":
