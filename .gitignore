@@ -19,8 +19,6 @@ data/*
 ~/.cache/huggingface/
 
 # Generated images and sample
-output*.png
-*.png
 !docs/assets/
 !docs/assets/*.png
 !docs/**/*.png
