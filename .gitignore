@@ -18,8 +18,7 @@ data/*
 ~/.cache/tiny-stable-diffusion/
 ~/.cache/huggingface/
 
-# Generated images and samples
-assets/
+# Generated images and sample
 output*.png
 *.png
 !docs/assets/
