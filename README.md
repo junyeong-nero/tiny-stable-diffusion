@@ -89,6 +89,13 @@ Settings: `checkpoint=checkpoints/diffusion.pt (40 epochs)`, `steps=50`, `guidan
 | `a watercolor painting of a tulip` | ![Prompt 09](docs/assets/diffusion_prompt_09.png) |
 | `an astronaut walking on the moon` | ![Prompt 10](docs/assets/diffusion_prompt_10.png) |
 
+### 4. Streamlit Demo Page
+
+| Demo View | Screenshot |
+|---|---|
+| VAE tab | ![VAE Screenshot](assets/screenshot-vae.png) |
+| Diffusion tab | ![Diffusion Screenshot](assets/screenshot-diffusion.png) |
+
 ---
 
 ## Usage
@@ -112,6 +119,18 @@ Generate images from text prompts:
 ```bash
 uv run main.py --generate --prompt "a cute cat" --steps 50 --guidance 7.5
 ```
+
+#### Inference Benchmark (M2 MacBook Air)
+
+Measured on **Apple M2 MacBook Air** using `scripts/measure-inference.sh` (`device=mps`).
+
+| Device | Steps | Batch | Repeats | Latency Mean (ms) | Speed (sec/img) | Peak Accel Mem (primary, MB) | Peak RAM (MB) | RAM Delta (MB) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| MPS (M2 MacBook Air) | 10 | 1 | 2 | 1553.15 | 1.553 | 1504.99 | 119.36 | 81.38 |
+
+Memory note: in MPS/CUDA runs, use `Peak Accel Mem` as the main inference memory metric. `RAM Delta` is only the additional process RAM during the measured interval.
+
+For full profiling outputs and CPU comparison, see [`scripts/README.md`](scripts/README.md) and `results/benchmarks/inference_profile_mps.json`.
 
 ### 3. Training
 
@@ -184,21 +203,6 @@ tiny-stable-diffusion/
 ├── docs/                # Documentation
 └── results/             # Generated images and evaluation outputs
 ```
-
----
-
-## TODO
-
-We are actively working on extending `tiny-stable-diffusion` with new capabilities.
-
-### 🎥 Motion Module (GIF Generation) - *In Progress*
-
-We are implementing a **Motion Module** to generate GIFs and short animations using the existing pre-trained models. This is inspired by [AnimateDiff](https://arxiv.org/abs/2307.04725).
-
-- **Goal**: Generate consistent 16-frame animations from text prompts.
-- **Approach**: Inject temporal attention layers into the frozen MMDiT backbone.
-- **Status**: Core modules and data pipeline implemented. Training loop in progress.
-- **Documentation**: [docs/extensions/MotionModule.md](docs/extensions/MotionModule.md)
 
 ---
 
