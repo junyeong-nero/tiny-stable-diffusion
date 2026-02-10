@@ -36,14 +36,8 @@ def main() -> None:
     parser.add_argument(
         "--train-diffusion", action="store_true", help="Stage 2: Train Diffusion on latent space"
     )
-    parser.add_argument(
-        "--train-motion", action="store_true", help="Stage 3: Train Motion Module for animation"
-    )
     parser.add_argument("--train", action="store_true", help="Train using config.yaml settings")
     parser.add_argument("--generate", action="store_true", help="Generate images from prompts")
-    parser.add_argument(
-        "--generate-gif", action="store_true", help="Generate animated GIFs from prompts"
-    )
     parser.add_argument(
         "--reconstruct-vae", action="store_true", help="Reconstruct image through VAE"
     )
@@ -53,9 +47,6 @@ def main() -> None:
         help="Generate images from random latent vectors (VAE decoder only)",
     )
     parser.add_argument("--demo", action="store_true", help="Run interactive demo")
-    parser.add_argument(
-        "--animation-demo", action="store_true", help="Run interactive animation demo"
-    )
     parser.add_argument("--evaluate", action="store_true", help="Evaluate with FID/IS/CLIPScore")
     parser.add_argument("--benchmark", action="store_true", help="Benchmark sampling speed/memory")
 
@@ -88,22 +79,13 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=50, help="Number of diffusion steps")
     parser.add_argument("--guidance", type=float, default=7.5, help="Guidance scale")
     parser.add_argument("--scaling-factor", type=float, default=None, help="VAE scaling factor")
-    parser.add_argument("--output", type=str, default="output.png", help="Output file path")
+    parser.add_argument("--output", type=str, default="results/output.png", help="Output file path")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument(
         "--latent-scale", type=float, default=1.0, help="Scale for random latent vectors"
     )
     parser.add_argument(
         "--reference-dir", type=str, default=None, help="Reference images dir for latent statistics"
-    )
-
-    # Animation arguments
-    parser.add_argument(
-        "--num-frames", type=int, default=16, help="Number of frames for GIF generation"
-    )
-    parser.add_argument("--fps", type=int, default=8, help="Frames per second for GIF")
-    parser.add_argument(
-        "--motion-checkpoint", type=str, default=None, help="Path to motion module checkpoint"
     )
 
     # Evaluation arguments
@@ -169,23 +151,15 @@ def main() -> None:
     elif args.train_diffusion:
         _run_diffusion_training(args)
 
-    elif args.train_motion:
-        _run_motion_training(args)
-
     elif args.train:
         stage = get_training_stage()
         if stage == "vae_train":
             _run_vae_training(args)
-        elif stage == "motion_train":
-            _run_motion_training(args)
         else:
             _run_diffusion_training(args)
 
     elif args.generate:
         _run_generation(args)
-
-    elif args.generate_gif:
-        _run_gif_generation(args)
 
     elif args.reconstruct_vae:
         _run_vae_reconstruction(args)
@@ -195,9 +169,6 @@ def main() -> None:
 
     elif args.demo:
         _run_demo(args)
-
-    elif args.animation_demo:
-        _run_animation_demo(args)
 
     elif args.evaluate:
         _run_evaluation(args)
@@ -331,6 +302,16 @@ def _parse_prompts(prompt_arg: str) -> list[str]:
     return [prompt_arg.strip()]
 
 
+def _resolve_results_path(path_str: str) -> Path:
+    """Resolve relative output paths under results/ by default."""
+    output_path = Path(path_str)
+    if output_path.is_absolute():
+        return output_path
+    if output_path.parts and output_path.parts[0] == "results":
+        return output_path
+    return Path("results") / output_path
+
+
 def _run_generation(args: argparse.Namespace) -> None:
     """Run image generation."""
     from src.inference.generator import generate
@@ -354,9 +335,10 @@ def _run_generation(args: argparse.Namespace) -> None:
 
     for i, img in enumerate(images):
         if len(prompts) > 1 or args.num_samples > 1:
-            output_path = f"output_{i}.png"
+            output_path = Path("results") / f"output_{i}.png"
         else:
-            output_path = args.output
+            output_path = _resolve_results_path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         img.save(output_path)
         print(f"Saved: {output_path}")
 
@@ -367,7 +349,8 @@ def _run_vae_reconstruction(args: argparse.Namespace) -> None:
 
     # Batch mode
     if args.input_dir is not None:
-        output_dir = args.output_dir or "samples/vae_reconstructed"
+        output_dir = args.output_dir or "results/vae/reconstructed"
+        output_dir = str(_resolve_results_path(output_dir))
         reconstruct_vae_batch(
             input_dir=args.input_dir,
             output_dir=output_dir,
@@ -380,9 +363,12 @@ def _run_vae_reconstruction(args: argparse.Namespace) -> None:
         print("Error: --input or --input-dir required for --reconstruct-vae")
         return
 
+    output_path = _resolve_results_path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     reconstruct_vae(
         input_path=args.input,
-        output_path=args.output,
+        output_path=str(output_path),
         checkpoint=args.vae_checkpoint,
     )
 
@@ -391,8 +377,10 @@ def _run_decode_random(args: argparse.Namespace) -> None:
     """Generate images from random latent vectors using VAE decoder only."""
     from src.inference.vae_inference import decode_random_latent
 
+    output_path = _resolve_results_path(args.output)
+
     decode_random_latent(
-        output_path=args.output,
+        output_path=output_path,
         checkpoint=args.vae_checkpoint,
         num_samples=args.num_samples,
         seed=args.seed,
@@ -408,124 +396,6 @@ def _run_demo(args: argparse.Namespace) -> None:
     demo(
         checkpoint=args.checkpoint,
         vae_checkpoint=args.vae_checkpoint,
-    )
-
-
-def _run_motion_training(args: argparse.Namespace) -> None:
-    """Run Motion Module training (Stage 3)."""
-    from src.training.motion_trainer import train_motion
-
-    config = get_config("motion_train")
-
-    # Override with CLI args
-    if args.dataset is not None:
-        config["dataset_name"] = args.dataset
-
-    if args.vae_checkpoint is not None:
-        config["vae_checkpoint"] = args.vae_checkpoint
-
-    if args.checkpoint is not None:
-        config["base_checkpoint"] = args.checkpoint
-
-    if args.epochs is not None:
-        config["epochs"] = args.epochs
-    if args.batch_size is not None:
-        config["batch_size"] = args.batch_size
-    if args.learning_rate is not None:
-        config["learning_rate"] = args.learning_rate
-
-    config["wandb_project"] = args.wandb_project
-    config["wandb_run_name"] = args.wandb_run_name or "motion-training"
-
-    if args.resume:
-        config["resume"] = True
-
-    train_motion(config, use_wandb=args.wandb)
-
-    # Push to HuggingFace Hub if requested
-    if args.push_to_hub:
-        _push_model_to_hub(
-            checkpoint_path=config["checkpoint_path"],
-            model_type="motion",
-            hub_model_id=args.hub_model_id,
-            private=args.hub_private,
-            config=config,
-        )
-
-
-def _run_gif_generation(args: argparse.Namespace) -> None:
-    """Run GIF generation."""
-    from src.inference.animation_generator import AnimationGenerator
-
-    if args.prompt is None:
-        print("Error: --prompt required for --generate-gif")
-        return
-
-    # Find checkpoints
-    vae_checkpoint = args.vae_checkpoint or "checkpoints/vae.pt"
-    diffusion_checkpoint = args.checkpoint
-
-    if diffusion_checkpoint is None:
-        from src.training.checkpoint import find_latest_checkpoint
-
-        diffusion_checkpoint = find_latest_checkpoint("checkpoints", prefix="diffusion")
-        if diffusion_checkpoint is None:
-            diffusion_checkpoint = "checkpoints/diffusion.pt"
-
-    motion_checkpoint = args.motion_checkpoint
-    if motion_checkpoint is None:
-        from src.training.checkpoint import find_latest_checkpoint
-
-        motion_checkpoint = find_latest_checkpoint("checkpoints", prefix="motion")
-
-    # Check checkpoints exist
-    if not Path(vae_checkpoint).exists():
-        print(f"Error: VAE checkpoint not found: {vae_checkpoint}")
-        return
-    if not Path(diffusion_checkpoint).exists():
-        print(f"Error: Diffusion checkpoint not found: {diffusion_checkpoint}")
-        return
-
-    # Create generator
-    generator = AnimationGenerator(
-        vae_checkpoint=vae_checkpoint,
-        diffusion_checkpoint=diffusion_checkpoint,
-        motion_checkpoint=motion_checkpoint,
-        num_frames=args.num_frames,
-    )
-
-    # Generate for each prompt
-    prompts = _parse_prompts(args.prompt)
-
-    for i, prompt in enumerate(prompts):
-        if len(prompts) > 1 or args.num_samples > 1:
-            output_path = f"output_{i}.gif"
-        else:
-            output_path = args.output.replace(".png", ".gif")
-            if not output_path.endswith(".gif"):
-                output_path = output_path + ".gif"
-
-        generator.generate_and_save(
-            prompt=prompt,
-            output_path=output_path,
-            num_frames=args.num_frames,
-            num_steps=args.steps,
-            guidance_scale=args.guidance,
-            seed=args.seed,
-            fps=args.fps,
-        )
-
-        print(f"Saved: {output_path}")
-
-
-def _run_animation_demo(args: argparse.Namespace) -> None:
-    """Run interactive animation demo."""
-    from src.inference.animation_generator import animation_demo
-
-    animation_demo(
-        vae_checkpoint=args.vae_checkpoint,
-        diffusion_checkpoint=args.checkpoint,
-        motion_checkpoint=args.motion_checkpoint,
     )
 
 
@@ -624,6 +494,8 @@ def _run_benchmark(args: argparse.Namespace) -> None:
         prompt = args.prompt.split("||")[0].strip()
 
     # Determine if sweep or single run
+    results_data: list[dict]
+
     if args.benchmark_steps is not None or args.benchmark_batch_sizes is not None:
         # Sweep mode
         steps_list = (
@@ -655,6 +527,7 @@ def _run_benchmark(args: argparse.Namespace) -> None:
             detail = results[0]
 
         print(format_benchmark_results(results, detail_result=detail))
+        results_data = [r.to_dict() for r in results]
     else:
         # Single run
         result = benchmark_generation(
@@ -667,14 +540,11 @@ def _run_benchmark(args: argparse.Namespace) -> None:
         )
 
         print(format_benchmark_results([result], detail_result=result))
+        results_data = [result.to_dict()]
 
     # Save results
     save_path = Path(results_dir) / "benchmark_results.json"
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    if args.benchmark_steps is not None or args.benchmark_batch_sizes is not None:
-        results_data = [r.to_dict() for r in results]
-    else:
-        results_data = [result.to_dict()]
     with open(save_path, "w") as f:
         json.dump(results_data, f, indent=2)
     print(f"\nResults saved to {save_path}")

@@ -22,14 +22,14 @@ from src.training.checkpoint import find_latest_checkpoint
 from src.utils.common import get_device
 
 
-def _load_vae(checkpoint: str | Path | None, device: str):
+def _load_vae(checkpoint: str | Path | None, device: str | torch.device):
     """Load VAE model from checkpoint.
-    
+
     Returns:
         Tuple of (vae, image_size, device)
     """
     device = get_device(device)
-    
+
     # Find VAE checkpoint
     if checkpoint is None:
         checkpoint = find_latest_checkpoint("checkpoints", prefix="vae")
@@ -58,7 +58,7 @@ def _load_vae(checkpoint: str | Path | None, device: str):
     vae.eval()
 
     epoch = ckpt.get("epoch", "unknown")
-    
+
     return vae, image_size, device, checkpoint, epoch
 
 
@@ -69,12 +69,17 @@ def _reconstruct_single(
     device,
 ) -> Image.Image:
     """Reconstruct a single image through VAE."""
-    transform = T.Compose([
-        T.Resize((image_size, image_size)),
-        T.ToTensor(),
-        T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-    ])
-    x = transform(img).unsqueeze(0).to(device)
+    transform = T.Compose(
+        [
+            T.Resize((image_size, image_size)),
+            T.ToTensor(),
+            T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+        ]
+    )
+    image_tensor = transform(img)
+    if not isinstance(image_tensor, torch.Tensor):
+        raise TypeError("Expected tensor output from image transform")
+    x = image_tensor.unsqueeze(0).to(device)
 
     # Encode and decode
     with torch.no_grad():
@@ -86,7 +91,7 @@ def _reconstruct_single(
     recon = recon.clamp(0, 1)
     recon = recon[0].permute(1, 2, 0).cpu().numpy()
     recon = (recon * 255).astype("uint8")
-    
+
     return Image.fromarray(recon)
 
 
@@ -122,7 +127,7 @@ def reconstruct_vae(
     # Load and reconstruct
     print(f"Loading image: {input_path}")
     img = Image.open(input_path).convert("RGB")
-    
+
     print("Running VAE reconstruction...")
     output_img = _reconstruct_single(vae, img, image_size, device)
 
@@ -170,35 +175,35 @@ def reconstruct_vae_batch(
     """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
-    
+
     if not input_dir.exists():
         raise FileNotFoundError(f"Input directory not found: {input_dir}")
-    
+
     # Find all input images
     input_files = sorted(input_dir.glob(pattern))
     if not input_files:
         raise FileNotFoundError(f"No files matching '{pattern}' in {input_dir}")
-    
+
     # Load VAE once
     vae, image_size, device, ckpt_path, epoch = _load_vae(checkpoint, device)
     print(f"Using device: {device}")
     print(f"Loaded VAE from {ckpt_path} (epoch {epoch})")
     print(f"Found {len(input_files)} images to process")
-    
+
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Process images with progress bar
     results = []
     for input_path in tqdm(input_files, desc="Reconstructing"):
         img = Image.open(input_path).convert("RGB")
         output_img = _reconstruct_single(vae, img, image_size, device)
         results.append(output_img)
-        
+
         # Save output
         output_path = output_dir / input_path.name
         output_img.save(output_path)
-        
+
         # Save comparison
         if save_comparison:
             orig_resized = img.resize((image_size, image_size))
@@ -207,7 +212,7 @@ def reconstruct_vae_batch(
             comparison.paste(output_img, (image_size, 0))
             comparison_path = output_dir / input_path.name.replace(".png", "_comparison.png")
             comparison.save(comparison_path)
-    
+
     print(f"Saved {len(results)} reconstructions to {output_dir}")
     return results
 
@@ -231,11 +236,13 @@ def _compute_latent_statistics(
     Returns:
         Tuple of (mean, std) tensors with shape (latent_channels,)
     """
-    transform = T.Compose([
-        T.Resize((image_size, image_size)),
-        T.ToTensor(),
-        T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-    ])
+    transform = T.Compose(
+        [
+            T.Resize((image_size, image_size)),
+            T.ToTensor(),
+            T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+        ]
+    )
 
     # Find reference images
     image_files = list(reference_dir.glob("*.png")) + list(reference_dir.glob("*.jpg"))
@@ -249,7 +256,10 @@ def _compute_latent_statistics(
     all_latents = []
     for img_path in image_files:
         img = Image.open(img_path).convert("RGB")
-        x = transform(img).unsqueeze(0).to(device)
+        image_tensor = transform(img)
+        if not isinstance(image_tensor, torch.Tensor):
+            raise TypeError("Expected tensor output from image transform")
+        x = image_tensor.unsqueeze(0).to(device)
         mean, _ = vae.encode(x)
         all_latents.append(mean)
 
@@ -259,7 +269,7 @@ def _compute_latent_statistics(
     # Compute per-channel mean and std across all spatial locations and images
     # Shape: (N, C, H, W) -> compute stats over (N, H, W) for each channel
     latent_mean = latents.mean(dim=(0, 2, 3))  # (C,)
-    latent_std = latents.std(dim=(0, 2, 3))    # (C,)
+    latent_std = latents.std(dim=(0, 2, 3))  # (C,)
 
     return latent_mean, latent_std
 
@@ -287,7 +297,7 @@ def decode_random_latent(
         seed: Random seed for reproducibility (optional)
         latent_scale: Scale factor for random latent std (default: 1.0)
         reference_dir: Directory with reference images for latent statistics
-                      (default: samples/original)
+                      (default: results/original, fallback: samples/original)
         device: Device to use ("auto", "cuda", "mps", "cpu")
 
     Returns:
@@ -313,13 +323,18 @@ def decode_random_latent(
 
     # Compute latent statistics from reference images
     if reference_dir is None:
-        reference_dir = Path("samples/original")
+        default_reference_dir = Path("results/original")
+        legacy_reference_dir = Path("samples/original")
+        if default_reference_dir.exists():
+            reference_dir = default_reference_dir
+        elif legacy_reference_dir.exists():
+            reference_dir = legacy_reference_dir
+        else:
+            reference_dir = default_reference_dir
     else:
         reference_dir = Path(reference_dir)
 
-    latent_mean, latent_std = _compute_latent_statistics(
-        vae, reference_dir, image_size, device
-    )
+    latent_mean, latent_std = _compute_latent_statistics(vae, reference_dir, image_size, device)
 
     print(f"Latent statistics - Mean range: [{latent_mean.min():.3f}, {latent_mean.max():.3f}]")
     print(f"Latent statistics - Std range: [{latent_std.min():.3f}, {latent_std.max():.3f}]")

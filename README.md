@@ -74,7 +74,7 @@ Image: Prompt ──► CLIP ──► MMDiT ──► VAE Decoder ──► Ima
 
 ### 3. Sample Outputs (Prompt-Image Pairs)
 
-Settings: `steps=50`, `guidance=7.5`, `num_samples=1`
+Settings: `checkpoint=checkpoints/diffusion.pt (40 epochs)`, `steps=50`, `guidance=7.5`, `num_samples=1`
 
 | Prompt | Image |
 |---|---|
@@ -182,7 +182,7 @@ tiny-stable-diffusion/
 │   └── demo/            # Streamlit app
 ├── checkpoints/         # Saved models
 ├── docs/                # Documentation
-└── samples/             # Generated images
+└── results/             # Generated images and evaluation outputs
 ```
 
 ---

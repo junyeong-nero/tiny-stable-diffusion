@@ -88,8 +88,12 @@ if [ "$NUM_SAMPLES" -gt 1 ]; then
     mkdir -p "$OUTPUT_DIR"
     for ((i = 0; i < NUM_SAMPLES; i++)); do
         src="output_${i}.png"
+        results_src="$RESULTS_DIR/output_${i}.png"
         if [ -f "$src" ]; then
             mv -f "$src" "$OUTPUT_DIR/$src"
+            echo "Saved: $OUTPUT_DIR/$src"
+        elif [ -f "$results_src" ]; then
+            mv -f "$results_src" "$OUTPUT_DIR/$src"
             echo "Saved: $OUTPUT_DIR/$src"
         fi
     done

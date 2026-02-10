@@ -155,44 +155,6 @@ def sample(self, model, shape, text_embeds, num_steps=50, ...):
     return x_t
 ```
 
-## GIF & Animation Generation
-
-The Motion Module extension allows generating smooth animations from text prompts.
-
-### 1. Generation Command
-
-```bash
-uv run main.py --generate-gif \
-    --prompt "a cat walking in the rain" \
-    --frames 16 \
-    --fps 8 \
-    --guidance 7.5 \
-    --steps 50
-```
-
-### 2. Video Sampling Process
-
-Animation generation follows a similar Euler ODE process as images, but operates on a **4D latent tensor** `(F, 16, 8, 8)` where `F` is the number of frames.
-
-1. **Text Encoding**: Same as images.
-2. **Noise Initialization**: `z_T = randn(F, 16, 8, 8)`.
-3. **Animated MMDiT Forward**:
-    - The model processes all frames together.
-    - **Temporal Attention** layers compute dependencies between frames to ensure smooth movement and consistency.
-4. **Euler Step**: Velocity prediction and latent update applied across all frames.
-5. **VAE Decoding**: Each frame is decoded independently to pixel space.
-6. **GIF Assembly**: Frames are combined into a GIF file at the specified FPS.
-
-### 3. Key Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--frames`| 16 | Number of frames to generate (8-32 recommended). |
-| `--fps`   | 8 | Frames per second for the output GIF. |
-| `--interpolation` | None | (Optional) Use AI-based frame interpolation for smoother motion. |
-
----
-
 ## Advanced Options
 
 ### CLI Options

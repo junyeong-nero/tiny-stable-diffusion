@@ -6,7 +6,6 @@ Utility scripts for training, inference, evaluation, and model distribution.
 
 - `scripts/train-vae.sh`: Train VAE (`--train-vae`)
 - `scripts/train-diffusion.sh`: Train diffusion model (`--train-diffusion`)
-- `scripts/train-motion.sh`: Train motion module (`--train-motion`)
 
 All training scripts forward extra CLI arguments to `main.py`.
 

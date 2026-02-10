@@ -25,7 +25,7 @@ output*.png
 !docs/assets/
 !docs/assets/*.png
 !docs/**/*.png
-!samples/original/
+!results/original/
 
 # Python-generated files
 __pycache__/

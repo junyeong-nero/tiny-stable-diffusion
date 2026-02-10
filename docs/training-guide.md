@@ -53,24 +53,11 @@ uv run main.py --train-diffusion --epochs 200 --batch-size 32
 uv run main.py --train-diffusion --vae-checkpoint checkpoints/vae.pt --epochs 200
 ```
 
-### 4. Stage 3: Motion Module Training (Optional GIF Extension)
-
-```bash
-# Basic Motion training (requires VAE and Diffusion)
-uv run main.py --train-motion --epochs 100 --batch-size 8
-
-# With memory optimizations (gradient checkpointing)
-uv run main.py --train-motion --epochs 100 --batch-size 2 --gradient-checkpointing
-```
-
-### 5. Image & GIF Generation
+### 4. Image Generation
 
 ```bash
 # Generate single image
 uv run main.py --generate --prompt "a cute cat"
-
-# Generate GIF animation
-uv run main.py --generate-gif --prompt "a cat walking" --frames 16 --fps 8
 
 # With options
 uv run main.py --generate \
@@ -86,7 +73,6 @@ uv run main.py --generate \
 # Upload after training
 uv run main.py --train-vae --push-to-hub --hub-model-id username/my-vae
 uv run main.py --train-diffusion --push-to-hub --hub-model-id username/my-diffusion
-uv run main.py --train-motion --push-to-hub --hub-model-id username/my-motion
 ```
 
 ---
@@ -97,7 +83,7 @@ uv run main.py --train-motion --push-to-hub --hub-model-id username/my-motion
 
 ```yaml
 # Current training stage
-training_stage: vae_train  # vae_train, diffusion_train, or motion_train
+training_stage: vae_train  # vae_train or diffusion_train
 
 # VAE training settings
 vae_train:
@@ -107,13 +93,6 @@ vae_train:
 diffusion_train:
     ...
 
-# Motion Module training settings
-motion_train:
-    base_checkpoint: checkpoints/diffusion.pt
-    motion_num_layers: 2
-    num_frames: 16
-    batch_size: 8
-    learning_rate: 1.0e-4
 ```
 
 ---
@@ -126,17 +105,6 @@ motion_train:
 ### Diffusion Training
 ...
 
-### Motion Module Training
-
-| Parameter | Default | Recommended Range | Description |
-|-----------|---------|-------------------|-------------|
-| `epochs` | 100 | 50-200 | Number of training epochs |
-| `batch_size` | 8 | 2-16 | Batch size (smaller than image due to VRAM) |
-| `learning_rate` | 1e-4 | 5e-5 ~ 2e-4 | Learning rate |
-| `num_frames` | 16 | 8-32 | Number of frames in a video clip |
-
----
-
 ## Hardware Requirements
 
 ### GPU Memory
@@ -145,8 +113,6 @@ motion_train:
 |-------|------------|------------|------|
 | VAE | - | 128 | ~8GB |
 | Diffusion | B | 32 | ~12GB |
-| Motion (16 frames)| B | 4 | ~16GB |
-| Motion (16 frames)| B | 1 (w/ Grad CKPT) | ~8GB |
 
 ### Recommended Specifications
 

@@ -56,6 +56,7 @@ dependencies = [
     "webdataset>=1.0.2",
     "torchmetrics[image]>=1.0.0",
     "scipy>=1.10.0",
+    "watchdog>=6.0.0",
 ]
 
 [project.optional-dependencies]

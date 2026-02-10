@@ -15,13 +15,13 @@
 #
 # Examples:
 #   # Evaluate on local images
-#   ./scripts/evaluate-vae.sh --input-dir samples/original
+#   ./scripts/evaluate-vae.sh --input-dir results/original
 #
 #   # Evaluate on HuggingFace dataset
 #   ./scripts/evaluate-vae.sh --dataset reach-vb/pokemon-blip-captions --max-samples 200
 #
 #   # Use specific checkpoint and save results
-#   ./scripts/evaluate-vae.sh --input-dir samples/original \
+#   ./scripts/evaluate-vae.sh --input-dir results/original \
 #       --checkpoint checkpoints/vae_e50.pt \
 #       --save results/vae_eval.json
 #
@@ -97,7 +97,7 @@ if [ -z "$INPUT_DIR" ] && [ -z "$DATASET" ]; then
     echo "Error: Either --input-dir or --dataset is required"
     echo ""
     echo "Usage:"
-    echo "  ./scripts/evaluate-vae.sh --input-dir samples/original"
+    echo "  ./scripts/evaluate-vae.sh --input-dir results/original"
     echo "  ./scripts/evaluate-vae.sh --dataset reach-vb/pokemon-blip-captions"
     exit 1
 fi

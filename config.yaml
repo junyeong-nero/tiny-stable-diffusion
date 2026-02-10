@@ -156,7 +156,7 @@ diffusion_train:
     - a bus on a city street
     - a pizza on a wooden table
   validation_interval: 10             # Generate samples every N epochs
-  sample_dir: samples                 # Directory for generated samples
+  sample_dir: results/diffusion       # Directory for generated samples
 
 # ┌───────────────────────────────────────────────────────────────────────────┐
 # │                         HuggingFace Hub Settings                          │
@@ -235,7 +235,7 @@ motion_train:
     - an animated shape
     - a simple motion
   validation_interval: 10
-  sample_dir: samples/motion
+  sample_dir: results/motion
 
 # ┌───────────────────────────────────────────────────────────────────────────┐
 # │                         HuggingFace Hub Settings                          │

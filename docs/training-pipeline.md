@@ -314,42 +314,6 @@ def generate_samples(model, diffusion, clip_encoder, vae_decoder, prompts, ...):
 4. Convert to image with VAE decoder
 5. Save: `samples/epoch_N/00_a_photo_of_a_cat.png`
 
-## Stage 3: Motion Module Training
-
-> File location: `src/training/motion_trainer.py`
-
-### Training Overview
-
-The third stage adds temporal consistency to the pre-trained image model. Instead of fine-tuning the base MMDiT, we only train the **Motion Module** (Temporal Attention layers) while keeping the spatial layers frozen.
-
-### Step-by-Step Training
-
-1. **Batch Loading**:
-   - Loads a video clip: `(B, F, 3, 64, 64)` where F is the number of frames.
-   - Example datasets: **WebVid-10M subset**, **UCF101**.
-
-2. **VAE Encoding**:
-   - Frames are encoded individually: `(B*F, 3, 64, 64)` → VAE → `(B, F, 16, 8, 8)`.
-
-3. **Noise Addition**:
-   - Same timestep `t` is typically applied to all frames in a clip to maintain motion trajectory.
-
-4. **Temporal Attention**:
-   - `AnimatedMMDiT` reshapes tokens to `(B*N, F, D)` where N is the number of spatial patches.
-   - Attention is computed across the `F` dimension (Time).
-
-5. **Velocity Prediction & Loss**:
-   - Predicts velocity for each frame.
-   - Loss: `MSE(v_pred, v_target)` averaged across space and time.
-
-### Training Strategy
-
-- **Frozen Backbone**: Prevents degradation of original image quality and text alignment.
-- **Progressive Learning**: Start with small frame counts (e.g., 8) then increase to 16 or 32.
-- **Zero-Initialization**: The output projection of the Motion Module is initialized to zero, so the training starts from a valid image generation state.
-
----
-
 ## Optimizer & Scheduler
 
 ### AdamW Optimizer
