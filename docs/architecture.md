@@ -1,105 +1,94 @@
 # Architecture Overview
 
-> 이 문서는 tiny-stable-diffusion의 전체 아키텍처 개요를 설명합니다. 각 모델의 상세 구현은 다음 문서를 참조하세요:
-> - VAE 상세: [models/VAE.md](./models/VAE.md)
-> - MMDiT 상세: [models/MMDiT.md](./models/MMDiT.md)
-> - Diffusion 상세: [models/Diffusion.md](./models/Diffusion.md)
-
-## 목차
-
-1. [전체 시스템 개요](#전체-시스템-개요)
-2. [데이터 흐름](#데이터-흐름)
-3. [핵심 컴포넌트](#핵심-컴포넌트)
+> This document provides a high-level overview of the `tiny-stable-diffusion` architecture. For detailed component specifications, please refer to the specific model documents.
 
 ---
 
-## 전체 시스템 개요
+## 🏗 System Overview
 
-tiny-stable-diffusion은 **Stable Diffusion 3**의 아키텍처를 따르는 교육용 구현체입니다. 두 단계 학습 파이프라인(VAE -> Diffusion)으로 이미지 생성을 수행합니다.
+`tiny-stable-diffusion` is an educational implementation of the **Stable Diffusion 3** architecture. It operates as a **Latent Diffusion Model (LDM)**, meaning it performs the computationally expensive diffusion process in a compressed latent space rather than directly on pixel values.
 
-### 아키텍처 다이어그램
+### Core Pipeline
+
+The system consists of three primary components working in tandem:
+
+1.  **VAE (Variational AutoEncoder)**: Compresses $64 \times 64$ images into $8 \times 8 \times 16$ latents and reconstructs them back to pixels.
+2.  **CLIP Text Encoder**: Converts natural language prompts into high-dimensional embeddings that the diffusion model can understand.
+3.  **MMDiT (Multi-Modal Diffusion Transformer)**: The "brain" of the system that learns to reverse the noise process in the latent space, conditioned on text embeddings.
+
+### Architecture Diagram
 
 ```mermaid
 graph LR
-    subgraph "tiny-stable-diffusion Architecture"
-        Input[Image] --> VAE_Enc[VAE Encoder]
-        VAE_Enc --> Diffusion[Diffusion Transformer]
-        Diffusion --> VAE_Dec[VAE Decoder]
-        VAE_Dec --> Output[Output Image]
-
-        Prompt[Prompt "a cat..."] --> TextEnc[Text Encoder CLIP]
-        TextEnc --> Diffusion
-
-        subgraph "Details"
-            Latent[Latent 16x8x8]
-            VAE_Enc -.-> Latent -.-> Diffusion
-        end
+    subgraph "Pixel Space"
+        Input[Image 64x64]
+        Output[Image 64x64]
     end
+
+    subgraph "Latent Space (8x8x16)"
+        VAE_Enc[VAE Encoder]
+        Diffusion[MMDiT / Diffusion]
+        VAE_Dec[VAE Decoder]
+    end
+
+    subgraph "Conditioning"
+        Prompt[Text Prompt] --> TextEnc[CLIP Encoder]
+    end
+
+    Input --> VAE_Enc
+    VAE_Enc --> Diffusion
+    TextEnc --> Diffusion
+    Diffusion --> VAE_Dec
+    VAE_Dec --> Output
 ```
 
-### 핵심 특징
+---
 
-| 구성요소 | 역할 | 관련 문서 |
-|----------|------|-----------|
-| **VAE** | 이미지/프레임을 latent space로 압축/복원 | [models/VAE.md](./models/VAE.md) |
-| **Diffusion** | Rectified Flow 기반 노이즈 제거 | [models/Diffusion.md](./models/Diffusion.md) |
-| **MMDiT** | SD3 스타일의 Joint Attention 기반 Transformer | [models/MMDiT.md](./models/MMDiT.md) |
-| **CLIP Encoder** | 텍스트 프롬프트를 임베딩으로 변환 | `src/text_encoder/clip_encoder.py` |
+## 🧩 Key Components
+
+| Component | Role | Detailed Doc |
+| :--- | :--- | :--- |
+| **VAE** | Image compression and reconstruction (f8 factor) | [models/VAE.md](./models/VAE.md) |
+| **MMDiT** | Joint Attention-based Transformer for denoising | [models/MMDiT.md](./models/MMDiT.md) |
+| **Diffusion** | Rectified Flow-based iterative denoising process | [models/Diffusion.md](./models/Diffusion.md) |
+| **CLIP** | Pre-trained text understanding (Frozen ViT-B/32) | `src/text_encoder/` |
 
 ---
 
-## 데이터 흐름
+## 🔄 Data Flow
 
-### 이미지 생성 (Image Generation)
-- `(B, 3, 64, 64)` → VAE → `(B, 16, 8, 8)` → MMDiT → Denoise → VAE → `(B, 3, 64, 64)`
+### 1. Training (Stage 2: Diffusion)
+*   **Input**: Real image $x$ and corresponding text $y$.
+*   **Encoding**: $x$ is encoded to latent $z$ via VAE. $y$ is encoded to embedding $c$ via CLIP.
+*   **Noising**: Random noise $\epsilon$ is added to $z$ based on timestep $t$ using Rectified Flow (linear interpolation).
+*   **Prediction**: MMDiT predicts the **velocity** $v$ required to move from noise back to the clean latent.
+*   **Loss**: Mean Squared Error (MSE) between predicted velocity and target velocity.
 
----
-
-## 핵심 컴포넌트
-
-### 1. VAE (Variational AutoEncoder)
-
-이미지를 저차원 잠재 공간(latent space)으로 압축하고 복원합니다.
-
-- **압축률**: 64×64×3 = 12,288 → 8×8×16 = **1,024** (12배 효율적)
-- **구조**: Encoder + Decoder (ResNet + Self-Attention)
-- **자세한 내용**: [models/VAE.md](./models/VAE.md)
-
-### 2. Diffusion Process (Rectified Flow)
-
-SD3에서 도입된 Rectified Flow 방식을 사용합니다.
-
-| 요소 | 설명 |
-|------|------|
-| **Method** | Rectified Flow |
-| **Noise Schedule** | Linear Schedule (Timestep 0 -> 1) |
-| **Prediction** | Velocity (v) Prediction |
-| **Sampling** | Euler ODE Solver |
-
-### 3. Diffusion Transformer (DiT / MMDiT)
-
-Latent representation에서 노이즈(Velocity)를 예측하는 트랜스포머 모델입니다.
-
-| 모델 | 특징 | 파일 위치 |
-|------|------|-----------|
-| **MMDiT** | Joint Attention, 양방향 text-image 상호작용 | [models/MMDiT.md](./models/MMDiT.md) |
+### 2. Inference (Generation)
+*   **Input**: Text prompt.
+*   **Encoding**: Prompt $\rightarrow$ CLIP embedding $c$.
+*   **Initialization**: Start with pure Gaussian noise $z_T$ in latent space.
+*   **Denoising**: Iteratively update $z$ using the Euler ODE solver for $N$ steps (default 50).
+*   **Decoding**: The final clean latent $z_0$ is passed through the VAE Decoder to produce the $64 \times 64$ RGB image.
 
 ---
 
-## 파라미터 요약
+## 📊 Summary of Parameters
 
-| 모델 조합 | Total Parameters |
-|-----------|-----------------|
-| VAE + DiT-S | ~61M |
-| VAE + MMDiT-S | ~108M |
-| VAE + DiT-B | ~181M |
-| VAE + MMDiT-B | ~208M |
+Depending on the configuration, the model size varies primarily based on the MMDiT backbone:
+
+| Config | MMDiT Params | Total System Params* |
+| :--- | :--- | :--- |
+| **Small (S)** | ~87M | ~231M |
+| **Base (B)** | ~187M | ~331M |
+| **Large (L)** | ~559M | ~703M |
+
+*\*Total includes VAE (~21M) and CLIP (~123M).*
 
 ---
 
-## 참고 자료
+## 📚 References
 
-- [VAE Paper](https://arxiv.org/abs/1312.6114) - Auto-Encoding Variational Bayes
-- [DiT Paper](https://arxiv.org/abs/2212.09748) - Scalable Diffusion Models with Transformers
-- [SD3 Paper](https://arxiv.org/abs/2403.03206) - Scaling Rectified Flow Transformers
-- [CLIP Paper](https://arxiv.org/abs/2103.00020) - Learning Transferable Visual Models
+- [Stable Diffusion 3 (SD3)](https://arxiv.org/abs/2403.03206) - Primary inspiration.
+- [DiT](https://arxiv.org/abs/2212.09748) - Baseline for Diffusion Transformers.
+- [Rectified Flow](https://arxiv.org/abs/2209.03003) - The mathematical foundation for the diffusion process.

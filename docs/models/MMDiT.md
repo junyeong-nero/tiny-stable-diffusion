@@ -1,163 +1,70 @@
-# MMDiT (Multi-Modal Diffusion Transformer) Documentation
+# MMDiT (Multi-Modal Diffusion Transformer)
 
-> Detailed guide to the MMDiT architecture used in tiny-stable-diffusion, based on Stable Diffusion 3.
-
----
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Architecture](#architecture)
-3. [Key Components](#key-components)
-4. [Comparison with Vanilla DiT](#comparison-with-vanilla-dit)
-5. [Implementation Details](#implementation-details)
-6. [References](#references)
+> The multi-modal backbone for Stable Diffusion 3.
 
 ---
 
-## Overview
+## 🔬 Overview
 
-**MMDiT (Multi-Modal Diffusion Transformer)** is the core backbone of Stable Diffusion 3. Unlike previous models (SD1.5, SDXL) that used U-Nets with Cross-Attention, or Vanilla DiT that treated text as a simple condition, MMDiT treats **text and image as equal modalities**.
+**MMDiT** is the core neural network of the `tiny-stable-diffusion` system. Unlike previous architectures (like SD 1.5/2.1) that relied on convolutional U-Nets, MMDiT is entirely based on the **Transformer** architecture. 
 
-### Core Concept: Joint Attention
+The "Multi-Modal" aspect refers to its ability to treat **Text tokens** and **Image tokens** as equal citizens in a shared latent space.
 
-Instead of `Image -> CrossAttention(Text) -> Image`, MMDiT processes both text and image tokens in a single sequence (or separate sequences that interact), allowing **bi-directional information flow**.
+### Core Innovation: Joint Attention
+In traditional cross-attention, image features "look" at text features. In **Joint Attention**, text and image features interact bi-directionally:
+- **Image** $\rightarrow$ **Text**
+- **Text** $\rightarrow$ **Image**
 
-- **SD1.5 / SDXL**: Image attends to Text (Cross-Attention). Text does NOT attend to Image.
-- **MMDiT**: Image attends to Text. Text attends to Image.
-
-This leads to significantly better text comprehension and typography generation.
-
----
-
-## Architecture
-
-```mermaid
-graph TD
-    subgraph "MMDiT Block"
-        ImgTokens["Image Tokens (NxD)"] --> LN1["Layernorm"]
-        TxtTokens["Text Tokens (MxD)"] --> LN2["Layernorm"]
-        
-        LN1 --> JointAttn["Joint Attention <br> [Image_Q | Text_Q] @ [Image_K | Text_K]^T"]
-        LN2 --> JointAttn
-        
-        JointAttn --> MLP1["MLP (Image)"]
-        JointAttn --> MLP2["MLP (Text)"]
-        
-        MLP1 --> NewImg["New Image"]
-        MLP2 --> NewTxt["New Text"]
-    end
-```
-
-### Data Flow
-
-1.  **Input Processing**:
-    *   **Image**: Latent patches (8x8) $\rightarrow$ Flatten $\rightarrow$ Linear Projection $\rightarrow$ Positional Embedding.
-    *   **Text**: CLIP embeddings $\rightarrow$ Linear Projection.
-2.  **Timestep Modulation**:
-    *   Time $t$ is embedded and modulated (AdaLN) into every layer.
-3.  **Joint Transformer Blocks**:
-    *   Processes combined sequences.
-4.  **Unpatchify**:
-    *   Image tokens are rearranged back into an 8x8 spatial grid.
+This allows the model to refine its understanding of the text prompt based on the visual features it is generating, leading to much better prompt adherence.
 
 ---
 
-## Key Components
+## 🏗 Architecture Details
 
-### 1. Joint Attention Mechanism
+### 1. Tokenization (Patchification)
+- The $8 \times 8 \times 16$ latent image is divided into $2 \times 2$ patches.
+- Each patch is flattened and projected into a $D$-dimensional embedding (e.g., $D=768$ for the Base model).
+- This results in a sequence of $4 \times 4 = 16$ image tokens.
 
-The critical innovation in MMDiT.
+### 2. Timestep & Text Embedding
+- **Timestep**: Embedded via a sinusoidal MLP and added using **AdaLN-Single** modulation.
+- **Text**: Pre-encoded CLIP embeddings are projected and concatenated with the image tokens.
 
-*   **Q, K, V Projection**: Separate projections for Image and Text.
-*   **Concatenation**: Queries, Keys, and Values are concatenated along the sequence dimension.
-    *   $Q_{total} = Concat(Q_{img}, Q_{txt})$
-    *   $K_{total} = Concat(K_{img}, K_{txt})$
-    *   $V_{total} = Concat(V_{img}, V_{txt})$
-*   **Attention**: Standard Self-Attention on the concatenated sequence.
-*   **Split**: Output is split back into Image and Text streams.
-
-This allows the model to:
-1.  Refine text understanding based on the current image state.
-2.  Generate image features perfectly aligned with specific text tokens.
-
-### 2. QK-RMSNorm
-
-To stabilize training at scale (especially with fp16/bf16), MMDiT applies **RMSNorm** to the Queries (Q) and Keys (K) before the attention dot product.
-
-$$Attention(Q, K, V) = Softmax(\frac{RMSNorm(Q) \cdot RMSNorm(K)^T}{\sqrt{d}}) V$$
-
-This prevents attention scores from growing too large, a common instability source in large ViTs.
-
-### 3. Register Tokens (Optional)
-
-We support adding **Register Tokens** (from ViT-Resisters paper). These are learnable tokens appended to the sequence that act as "global storage" or "sinks" for information, reducing artifacts in attention maps.
+### 3. The MMDiT Block
+Each block consists of:
+- **QK-RMSNorm**: Normalizing queries and keys before attention to stabilize training.
+- **Joint Attention**: Both modalities attend to each other in a unified sequence.
+- **Modality-Specific MLPs**: Separate feed-forward networks for image and text streams to preserve their unique characteristics.
 
 ---
 
-## Comparison with Vanilla DiT
+## 📏 Model Sizes
 
-| Feature | Vanilla DiT | MMDiT (Ours/SD3) |
-| :--- | :--- | :--- |
-| **Conditioning** | adaptive Layer Norm (adaLN) + Cross-Attention | Joint Attention |
-| **Text Encoder** | Fixed (usually class label or simple embed) | Trainable context (via Joint Attn) |
-| **Modality Interaction** | One-way (Text $\rightarrow$ Image) | Two-way (Text $\leftrightarrow$ Image) |
-| **Parameter Efficiency** | High (shared weights) | Lower (separate weights for modalities) |
-| **Performance** | Good for class-cond | Superior for text-to-image |
+We offer four configurations based on the SD3 scaling laws:
+
+| Size | Layers | Hidden Dim | Heads | Approx. Params |
+| :--- | :--- | :--- | :--- | :--- |
+| **S** (Small) | 12 | 384 | 6 | ~87M |
+| **B** (Base) | 12 | 768 | 12 | ~187M |
+| **L** (Large) | 24 | 1024 | 16 | ~559M |
+| **XL** (X-Large)| 28 | 1152 | 16 | ~780M |
 
 ---
 
-## Implementation Details
+## ⚙️ Configuration
 
-### Model Configuration (`config.yaml`)
-
+Key settings in `config.yaml`:
 ```yaml
 diffusion_train:
   model_type: mmdit
   model_size: B        # S, B, L, XL
-  qk_rmsnorm: true     # Recommended for stability
-  register_tokens: 0   # Optional
-```
-
-### Parameter Counts (Approx.)
-
-| Size | Layers | Width | Heads | Params |
-| :--- | :---: | :---: | :---: | :---: |
-| **S** (Small) | 12 | 384 | 6 | 87M |
-| **B** (Base) | 12 | 768 | 12 | 187M |
-| **L** (Large) | 24 | 1024 | 16 | 559M |
-| **XL** (X-Large)| 28 | 1152 | 16 | 780M |
-
-### Code Structure (`src/models/mmdit.py`)
-
-The implementation relies on `src.models.mmdit.MMDiT` which wraps a PyTorch module.
-
-```python
-class MMDiT(nn.Module):
-    def __init__(self, ...):
-        # 1. Patch Embeddings
-        self.patch_embed = PatchEmbed(...)
-        
-        # 2. Main Transformer Backbone
-        self.mmdit = MMDitModel(...)
-        
-        # 3. Final Decoding
-        self.final_layer = FinalLayer(...)
-
-    def forward(self, x, t, text_embeds):
-        # x: (B, C, H, W)
-        # t: (B,)
-        # text_embeds: (B, D_clip)
-        
-        # ... processing ...
-        return noise_pred
+  qk_rmsnorm: true     # Stabilizes training
+  patch_size: 2
 ```
 
 ---
 
-## References
-
-*   **Scaling Rectified Flow Transformers for High-Resolution Image Synthesis** (SD3 Paper): [arXiv:2403.03206](https://arxiv.org/abs/2403.03206)
-*   **Fast and High-Quality Image Generation with Efficient Multi-Modal Transformer**: Explains the Joint Attention mechanism details.
-
-```
+## 📚 Implementation Reference
+- **Model Definition**: `src/models/mmdit.py`
+- **Attention Logic**: `src/models/layers.py`
+- **Training Logic**: `src/training/trainer.py`
