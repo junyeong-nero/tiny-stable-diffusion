@@ -110,7 +110,21 @@ For all helper scripts, see [`scripts/README.md`](scripts/README.md).
 bash scripts/setup.sh
 ```
 
-### 2. Inference
+### 2. Model Weights
+
+Pretrained checkpoints are available on Hugging Face:
+- https://huggingface.co/junyeong-nero/tiny-sd-models
+
+Download weights with `scripts/download_from_hub.py`:
+
+```bash
+# Download both VAE and diffusion checkpoints to ./checkpoints
+uv run python scripts/download_from_hub.py \
+  --repo-id junyeong-nero/tiny-sd-models \
+  --model-type all
+```
+
+### 3. Inference
 
 #### Image Generation
 
@@ -132,7 +146,7 @@ Memory note: in MPS/CUDA runs, use `Peak Accel Mem` as the main inference memory
 
 For full profiling outputs and CPU comparison, see [`scripts/README.md`](scripts/README.md) and `results/benchmarks/inference_profile_mps.json`.
 
-### 3. Training
+### 4. Training
 
 ```bash
 ./scripts/train-vae.sh       # Stage 1
