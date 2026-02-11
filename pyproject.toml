@@ -57,6 +57,7 @@ dependencies = [
     "torchmetrics[image]>=1.0.0",
     "scipy>=1.10.0",
     "watchdog>=6.0.0",
+    "lpips>=0.1.4",
 ]
 
 [project.optional-dependencies]

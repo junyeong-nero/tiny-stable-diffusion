@@ -117,7 +117,8 @@ def compute_fid(
     Returns:
         FID score (lower is better)
     """
-    fid = FrechetInceptionDistance(normalize=False).to(device)
+    metric_device = _resolve_metrics_device(device, metric_name="FID")
+    fid = FrechetInceptionDistance(normalize=False).to(metric_device)
 
     real = _to_uint8_tensor(real_images)
     gen = _to_uint8_tensor(generated_images)
@@ -128,11 +129,11 @@ def compute_fid(
 
     # Update in batches to save memory
     for i in range(0, len(real), batch_size):
-        batch = real[i : i + batch_size].to(device)
+        batch = real[i : i + batch_size].to(metric_device)
         fid.update(batch, real=True)
 
     for i in range(0, len(gen), batch_size):
-        batch = gen[i : i + batch_size].to(device)
+        batch = gen[i : i + batch_size].to(metric_device)
         fid.update(batch, real=False)
 
     score = fid.compute().item()
@@ -205,11 +206,9 @@ def compute_clip_fid(
     sigma_gen = np.cov(gen_np, rowvar=False)
 
     diff = mu_real - mu_gen
-    covmean = linalg.sqrtm(sigma_real @ sigma_gen)
-
-    # Handle numerical instability
+    covmean = np.asarray(linalg.sqrtm(sigma_real @ sigma_gen))
     if np.iscomplexobj(covmean):
-        covmean = covmean.real
+        covmean = np.real(covmean)
 
     fid_score = float(
         diff @ diff + np.trace(sigma_real) + np.trace(sigma_gen) - 2 * np.trace(covmean)
@@ -259,13 +258,14 @@ def compute_inception_score(
     Returns:
         Tuple of (IS mean, IS std)
     """
-    inception_score = InceptionScore(normalize=False, splits=splits).to(device)
+    metric_device = _resolve_metrics_device(device, metric_name="Inception Score")
+    inception_score = InceptionScore(normalize=False, splits=splits).to(metric_device)
 
     imgs = _to_uint8_tensor(images)
     imgs = _upsample_for_inception(imgs)
 
     for i in range(0, len(imgs), batch_size):
-        batch = imgs[i : i + batch_size].to(device)
+        batch = imgs[i : i + batch_size].to(metric_device)
         inception_score.update(batch)
 
     mean, std = inception_score.compute()
@@ -337,6 +337,13 @@ def run_self_test(device: str = "cpu") -> None:
     print(f"   FID (CLIP): {clip_fid:.2f}")
 
     print("\nAll metrics computed successfully!")
+
+
+def _resolve_metrics_device(device: str, metric_name: str) -> str:
+    if device.startswith("mps"):
+        print(f"  {metric_name}: using cpu backend (MPS does not support float64 states)")
+        return "cpu"
+    return device
 
 
 if __name__ == "__main__":

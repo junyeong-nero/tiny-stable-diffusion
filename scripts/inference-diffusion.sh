@@ -30,7 +30,7 @@ GUIDANCE="${GUIDANCE:-7.5}"
 SEED="${SEED:-}"
 NUM_SAMPLES="${NUM_SAMPLES:-1}"
 SCALING_FACTOR="${SCALING_FACTOR:-0.4869}"
-RESULTS_DIR="${RESULTS_DIR:-results/diffusion}"
+RESULTS_DIR="${RESULTS_DIR:-results/inference/diffusion}"
 
 if [[ "$OUTPUT" == results/* ]]; then
     OUTPUT_PATH="$OUTPUT"

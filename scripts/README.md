@@ -17,8 +17,8 @@ All training scripts forward extra CLI arguments to `main.py`.
 - `scripts/evaluate-vae.sh`: Evaluate VAE reconstruction quality
 
 Default outputs are saved under `results/`:
-- VAE: `results/vae/`
-- Diffusion: `results/diffusion/`
+- VAE: `results/inference/vae/`
+- Diffusion: `results/inference/diffusion/`
 
 ## Inference Profiling
 

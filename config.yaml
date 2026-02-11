@@ -156,7 +156,7 @@ diffusion_train:
     - a bus on a city street
     - a pizza on a wooden table
   validation_interval: 10             # Generate samples every N epochs
-  sample_dir: results/diffusion       # Directory for generated samples
+  sample_dir: results/inference/diffusion       # Directory for generated samples
 
 # ┌───────────────────────────────────────────────────────────────────────────┐
 # │                         HuggingFace Hub Settings                          │
@@ -252,11 +252,11 @@ hub:
 evaluation:
   metrics: [fid, clip_fid, is, clip_score]
   num_eval_samples: 1000
-  eval_batch_size: 32
+  eval_batch_size: 1
   eval_num_steps: 50
   eval_guidance_scale: 7.5
   eval_seed: 42
-  results_dir: results/evaluation
+  results_dir: results/evaluation/diffusion
 
 benchmark:
   warmup_runs: 3

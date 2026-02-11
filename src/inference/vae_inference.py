@@ -297,7 +297,7 @@ def decode_random_latent(
         seed: Random seed for reproducibility (optional)
         latent_scale: Scale factor for random latent std (default: 1.0)
         reference_dir: Directory with reference images for latent statistics
-                      (default: results/original, fallback: samples/original)
+                      (default: results/original, fallback: assets/samples)
         device: Device to use ("auto", "cuda", "mps", "cpu")
 
     Returns:
@@ -324,7 +324,7 @@ def decode_random_latent(
     # Compute latent statistics from reference images
     if reference_dir is None:
         default_reference_dir = Path("results/original")
-        legacy_reference_dir = Path("samples/original")
+        legacy_reference_dir = Path("assets/samples")
         if default_reference_dir.exists():
             reference_dir = default_reference_dir
         elif legacy_reference_dir.exists():

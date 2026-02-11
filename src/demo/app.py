@@ -28,7 +28,7 @@ from src.utils.common import get_device
 # Constants
 # ---------------------------------------------------------------------------
 CHECKPOINT_DIR = Path("checkpoints")
-SAMPLE_IMAGE_DIR = Path("samples/original")
+SAMPLE_IMAGE_DIR = Path("assets/samples")
 
 DIFFUSION_PROMPT_HINTS = [
     "a fluffy orange cat on a sofa",
@@ -479,7 +479,7 @@ def vae_reconstruction_page():
         if source == "Sample Image":
             sample_images = list_sample_images()
             if not sample_images:
-                st.warning("No sample images found in `samples/original`.")
+                st.warning("No sample images found in `assets/samples`.")
                 return
 
             sample_choice = st.selectbox(

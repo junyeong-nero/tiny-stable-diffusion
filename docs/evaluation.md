@@ -20,7 +20,7 @@ VAE evaluation focuses on **fidelity**: how well can the model reconstruct an im
 ### Running VAE Eval
 ```bash
 # Evaluate on a local folder of images
-./scripts/evaluate-vae.sh --input-dir samples/original --checkpoint checkpoints/vae.pt
+./scripts/evaluate-vae.sh --input-dir assets/samples --checkpoint checkpoints/vae.pt
 
 # Evaluate on a HuggingFace dataset
 ./scripts/evaluate-vae.sh --dataset reach-vb/pokemon-blip-captions --max-samples 200

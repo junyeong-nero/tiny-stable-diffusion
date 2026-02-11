@@ -23,7 +23,7 @@
 #   # Use specific checkpoint and save results
 #   ./scripts/evaluate-vae.sh --input-dir results/original \
 #       --checkpoint checkpoints/vae_e50.pt \
-#       --save results/vae_eval.json
+#       --save results/evaluation/vae/eval_results.json
 #
 # Metrics:
 #   - PSNR (Peak Signal-to-Noise Ratio): Higher is better, typical 20-40 dB
@@ -41,7 +41,7 @@ VAE_CHECKPOINT="${VAE_CHECKPOINT:-}"
 INPUT_DIR=""
 DATASET=""
 MAX_SAMPLES="100"
-SAVE_PATH=""
+SAVE_PATH="results/evaluation/vae/eval_results.json"
 NO_LPIPS=""
 SPLIT="train"
 IMAGE_FIELD="image"
@@ -129,10 +129,8 @@ fi
 echo "Max samples: $MAX_SAMPLES"
 CMD+=(--max-samples "$MAX_SAMPLES")
 
-if [ -n "$SAVE_PATH" ]; then
-    echo "Save results to: $SAVE_PATH"
-    CMD+=(--save "$SAVE_PATH")
-fi
+echo "Save results to: $SAVE_PATH"
+CMD+=(--save "$SAVE_PATH")
 
 if [ -n "$NO_LPIPS" ]; then
     echo "LPIPS: disabled"

@@ -1,0 +1,11 @@
+{
+  "fid": 343.1047058105469,
+  "clip_fid": 47.23408401704401,
+  "inception_score_mean": 1.0,
+  "inception_score_std": 8.429369557916289e-08,
+  "clip_score_mean": 25.339282989501953,
+  "clip_score_std": 0.0,
+  "num_generated": 10,
+  "num_real": 10,
+  "checkpoint": "checkpoints/diffusion.pt"
+}

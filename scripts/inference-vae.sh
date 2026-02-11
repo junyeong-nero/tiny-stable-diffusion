@@ -12,7 +12,7 @@
 #
 # Environment variables:
 #   VAE_CHECKPOINT - Path to VAE checkpoint (default: checkpoints/vae_e30.pt)
-#   RESULTS_DIR - Base output directory (default: results/vae)
+#   RESULTS_DIR - Base output directory (default: results/inference/vae)
 #   INPUT_DIR - Input directory in --all mode (default: results/original)
 #   EVAL_MAX_SAMPLES - Max samples for reconstruction evaluation (default: 100)
 #   NO_LPIPS=1 - Disable LPIPS metric during evaluation
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 VAE_CHECKPOINT="${VAE_CHECKPOINT:-checkpoints/vae.pt}"
-RESULTS_DIR="${RESULTS_DIR:-results/vae}"
+RESULTS_DIR="${RESULTS_DIR:-results/inference/vae}"
 INPUT_DIR="${INPUT_DIR:-results/original}"
 EVAL_MAX_SAMPLES="${EVAL_MAX_SAMPLES:-100}"
 NO_LPIPS="${NO_LPIPS:-0}"

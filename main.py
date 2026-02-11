@@ -349,7 +349,7 @@ def _run_vae_reconstruction(args: argparse.Namespace) -> None:
 
     # Batch mode
     if args.input_dir is not None:
-        output_dir = args.output_dir or "results/vae/reconstructed"
+        output_dir = args.output_dir or "results/inference/vae/reconstructed"
         output_dir = str(_resolve_results_path(output_dir))
         reconstruct_vae_batch(
             input_dir=args.input_dir,
@@ -431,7 +431,7 @@ def _run_evaluation(args: argparse.Namespace) -> None:
     eval_num_steps = args.steps  # argparse default: 50
     eval_guidance = args.guidance  # argparse default: 7.5
     eval_seed = args.seed if args.seed is not None else config.get("eval_seed", 42)
-    results_dir = config.get("results_dir", "results/evaluation")
+    results_dir = config.get("results_dir", "results/evaluation/diffusion")
     save_path = Path(results_dir) / "eval_results.json"
 
     # Dataset: use --dataset or fall back to diffusion_train.dataset_name
