@@ -2,6 +2,21 @@
 
 Utility scripts for training, inference, evaluation, and model distribution.
 
+## Quick Start
+
+Download pretrained checkpoints from Hugging Face with the wrapper script:
+
+```bash
+./scripts/hf.sh download all junyeong-nero/tiny-sd-models
+```
+
+You can also download a single checkpoint type:
+
+```bash
+./scripts/hf.sh download vae junyeong-nero/tiny-sd-models
+./scripts/hf.sh download diffusion junyeong-nero/tiny-sd-models
+```
+
 ## Training
 
 - `scripts/train-vae.sh`: Train VAE (`--train-vae`)

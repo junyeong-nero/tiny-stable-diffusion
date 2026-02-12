@@ -1,55 +1,54 @@
-# Comparison: tiny-stable-diffusion vs. Others
+# ⚖️ Comparison: tiny vs. SOTA
 
-> How `tiny-stable-diffusion` stacks up against industry standards like Stable Diffusion 3 and SD 1.5.
+> How `tiny-stable-diffusion` stacks up against industry standards like SD3 and SD 1.5.
 
 ---
 
-## ⚖️ Feature Comparison Matrix
+## 🔍 Feature Comparison Matrix
 
-| Feature | tiny-stable-diffusion | Stable Diffusion 3 (Medium) | Stable Diffusion 1.5 |
+| Feature | tiny-stable-diffusion | Stable Diffusion 3 (Med) | Stable Diffusion 1.5 |
 | :--- | :--- | :--- | :--- |
 | **Architecture** | **MMDiT** (Transformer) | MMDiT (Transformer) | U-Net (CNN) |
-| **Diffusion Type** | **Rectified Flow** (Linear) | Rectified Flow (Linear) | DDPM / DDIM (Gaussian) |
+| **Framework** | **Rectified Flow** | Rectified Flow | DDPM / DDIM |
 | **Resolution** | **64 × 64** | 1024 × 1024 | 512 × 512 |
-| **Latent Size** | **8 × 8 × 16** | 128 × 128 × 16 | 64 × 64 × 4 |
-| **Latent Channels** | **16** | 16 | 4 |
-| **Parameters** | **~200M** (Backbone) | 2B | 860M |
-| **Text Encoder** | **CLIP ViT-B/32** | CLIP-G + CLIP-L + T5-XXL | CLIP ViT-L/14 |
-| **Hardware Req.** | **Consumer GPU (8GB)** | A100 / H100 Cluster | A100 Cluster |
+| **Latent Space** | **8 × 8 × 16** | 128 × 128 × 16 | 64 × 64 × 4 |
+| **Parameters** | **~200M** (Backbone) | 2,000M (2B) | 860M |
+| **Hardware** | **Consumer GPU / Laptop** | A100 / H100 Clusters | Mid-range GPU |
 
 ---
 
-## 🔍 Detailed Differences
+## 💡 Key Differentiators
 
-### 1. Transformer vs. U-Net
-*   **SD 1.5 (U-Net)**: Uses a convolutional U-Net with inductive biases for spatial locality. While effective, it is harder to scale compared to Transformers.
-*   **tiny-sd (MMDiT)**: Adopts the **SD3 architecture**. It treats images as sequences of patches (tokens), processing them with Transformers. This allows for better scaling and more natural multi-modal (text/image) interaction via **Joint Attention**.
+### 1. Transformer-Centric Design (MMDiT)
+Unlike SD 1.5 which uses a convolutional U-Net, this project adopts the **MMDiT (Multi-Modal Diffusion Transformer)**. 
+- **The Patch Advantage**: We treat images as sequences of patches (tokens). This allows the model to leverage the same scaling laws that made LLMs successful.
+- **Joint Attention**: Both text and image tokens inhabit the same Transformer blocks, allowing for bidirectional information flow.
 
-### 2. Rectified Flow vs. DDPM
-*   **SD 1.5 (DDPM)**: Uses a curved stochastic path from noise to data, requiring complex noise schedules (linear, cosine).
-*   **tiny-sd / SD3 (Rectified Flow)**: Uses a **straight-line deterministic path**.
-    *   $X_t = (1-t)X_0 + tX_1$
-    *   **Advantage**: Simpler to simulate using standard ODE solvers (like Euler), leading to faster convergence with fewer steps.
+### 2. Rectified Flow vs. Gaussian Diffusion
+We use **Rectified Flow**, which is the current state-of-the-art for diffusion efficiency.
+- **Straight Paths**: While SD 1.5 follows a curved stochastic path, we learn a **straight-line deterministic path** between noise and data.
+- **Velocity Prediction**: Instead of predicting "noise" to be subtracted, we predict the "velocity" required to reach the target image. This leads to faster convergence with fewer sampling steps.
 
-### 3. High-Dimensional Latents
-*   **SD 1.5**: Uses a 4-channel latent space ($64 \times 64 \times 4$).
-*   **tiny-sd / SD3**: Uses a **16-channel** latent space.
-    *   Even at our $64 \times 64$ resolution, we maintain the 16-channel design. This allows the VAE to capture significantly more semantic information per spatial location, reducing the complexity required of the diffusion transformer.
+### 3. High-Dimensional Latents (16 Channels)
+Standard VAEs (like SD 1.5) use 4 latent channels. Following SD3, we use **16 channels**.
+- **Information Density**: Even at $64 \times 64$, the 16-channel bottleneck allows the VAE to capture rich semantic details, reducing the workload on the Diffusion model.
 
 ---
 
-## 🎯 Why "Tiny"?
+## 🎯 Target Audience & Goals
 
-This project prioritizes **education, accessibility, and hackability** over photorealism.
+This project is NOT intended to replace production-grade models. Instead, it serves as a **"Miniature Lab"**:
 
-1.  **Consumer-Grade Training**: Train from scratch on a single gaming GPU or a free Colab instance in just a few hours.
-2.  **Readable Implementation**: The code is designed to be read. You can understand the core of `MMDiT` by looking at a few hundred lines of clean PyTorch code.
-3.  **The Perfect Sandbox**: Want to experiment with a new attention mechanism or loss function? It's much easier to iterate on a 200M parameter model than a 2B parameter one.
-4.  **Full Logic, Small Scale**: We use the **exact same training dynamics** and architectural innovations as SD3, providing a faithful "miniature" version of the state-of-the-art.
+1.  **Educational Transparency**: The entire pipeline fits in your head. You can trace a single pixel from the prompt to the final output.
+2.  **Rapid Prototyping**: Test new ideas (like custom attention or loss functions) in hours, not weeks.
+3.  **Hardware Accessibility**: If you can run a modern web browser, you can likely train or run inference on this model.
 
 ---
 
 ## 📉 Expectations
 
-*   **What it is NOT**: A replacement for Midjourney or SDXL. It won't generate high-fidelity faces or complex photorealistic textures.
-*   **What it IS**: A powerful educational tool that generates coherent objects (animals, simple scenes, shapes) and demonstrates the mathematical beauty of modern diffusion models.
+*   **Capabilities**: Generates coherent animals, simple objects, and abstract scenes. Excellent at demonstrating prompt alignment.
+*   **Limitations**: No photorealistic human faces or complex text rendering. It is a "coarse-to-fine" learning demonstration at low resolution.
+
+---
+*For a deep dive into the math, see [Diffusion Process](./models/Diffusion.md).*

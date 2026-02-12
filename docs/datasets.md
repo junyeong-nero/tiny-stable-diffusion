@@ -1,84 +1,86 @@
-# Dataset Guide
+# 📚 Dataset Management Guide
 
-> A guide to the datasets used for training and evaluating `tiny-stable-diffusion`.
+> How to source, configure, and stream data for `tiny-stable-diffusion`.
 
 ---
 
-## 📚 Supported Datasets
+## 🏗 Supported Datasets
 
-We primarily leverage datasets from the **Hugging Face Hub** for ease of use and reproducibility.
+We leverage the **Hugging Face Hub** for seamless data integration. While the model is "tiny," it thrives on diverse and well-captioned data.
 
-### 1. LAION-300k (Recommended for VAE)
+### 1. LAION-300k (The VAE Specialist)
 *   **ID**: `hmu013/LAION-300k`
-*   **Purpose**: VAE Training (Stage 1).
-*   **Why**: VAEs need to learn general image statistics (edges, textures, colors). A diverse, large-scale dataset like LAION is ideal for this.
-*   **Usage**: Usually streamed due to size.
+*   **Role**: Stage 1 (VAE Training).
+*   **Context**: VAEs need to learn "how to see" (textures, edges, colors). LAION provides the massive visual diversity required for robust image compression.
+*   **Usage**: **Streaming is highly recommended** to avoid 100GB+ downloads.
 
-### 2. Oxford Pets Enriched (Recommended for Diffusion)
+### 2. Oxford Pets Enriched (The Diffusion Specialist)
 *   **ID**: `visual-layer/oxford-iiit-pet-vl-enriched`
-*   **Purpose**: Diffusion Training (Stage 2).
-*   **Why**: For a "tiny" model, training on a specific domain (like pets) yields significantly better visual results than attempting to learn a general domain with limited capacity.
-*   **Features**: High-quality images with detailed, enriched captions.
+*   **Role**: Stage 2 (Diffusion Training).
+*   **Context**: For a 200M parameter model, focusing on a specific domain (like animals) produces significantly higher quality results than a broad "everything" model.
+*   **Features**: Includes high-quality images and detailed, descriptive captions.
 
-### 3. Pokemon BLIP Captions (Fast Testing)
+### 3. Pokemon BLIP (Rapid Prototyping)
 *   **ID**: `reach-vb/pokemon-blip-captions`
-*   **Purpose**: Fast debugging or "Hello World" training.
-*   **Size**: ~800 images.
+*   **Role**: Debugging and "Hello World" runs.
+*   **Size**: ~800 images. Perfect for verifying your setup in minutes.
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ Configuration Patterns
 
-Datasets are configured in `config.yaml` under their respective training sections.
+Datasets are configured in `config.yaml`. Here are the recommended patterns:
 
-### VAE Configuration (Streaming)
+### VAE Training (Streaming Mode)
 ```yaml
 vae_train:
   dataset_name: hmu013/LAION-300k
-  image_field: png       # Column name containing the image
-  stream: true           # Enable streaming (don't download whole 300k)
+  image_field: png
+  stream: true           # Recommended: Doesn't store files on disk
   batch_size: 256
 ```
 
-### Diffusion Configuration (Local)
+### Diffusion Training (Local Mode)
 ```yaml
 diffusion_train:
   dataset_name: visual-layer/oxford-iiit-pet-vl-enriched
   image_field: image
   caption_field: caption_enriched
-  stream: false          # Small enough to download locally for speed
+  stream: false          # Recommended: Download once for faster repeated access
 ```
 
 ---
 
-## 🔄 Streaming vs. Local
+## 🔄 Data Access Strategy
 
-| Mode | **Streaming** (`stream: true`) | **Local** (`stream: false`) |
-| :--- | :--- | :--- |
-| **Storage** | Zero disk space required. | Requires local disk space. |
-| **Speed** | Initial start is instant. | Initial download takes time. |
-| **Network** | Constant internet required. | Offline after initial download. |
-| **Best For** | Massive datasets (LAION, COCO). | Small/Medium datasets (<10GB). |
+| Mode | Pros | Cons | Best For |
+| :--- | :--- | :--- | :--- |
+| **Streaming** | No disk space needed; Instant start. | High network load; Potential latency. | LAION, COCO, Large sets. |
+| **Local** | Offline capable; Maximum speed. | Requires disk space (1GB - 50GB). | Specific domains (Pets, Pokemon). |
 
 ---
 
-## 🛠 Adding Custom Datasets
+## 🛠 Adding Your Own Data
 
-### 1. Hugging Face Method (Preferred)
-1.  Upload your dataset to Hugging Face (e.g., `my-username/my-dataset`).
-2.  Ensure it contains an image column and a text column (for diffusion).
-3.  Update `config.yaml`:
-    ```yaml
-    dataset_name: my-username/my-dataset
-    image_field: your_image_column
-    caption_field: your_text_column
-    ```
+### Option A: Hugging Face (Easiest)
+1.  Upload your dataset to Hugging Face.
+2.  Specify the `dataset_name`, `image_field`, and `caption_field` in `config.yaml`.
+3.  The trainer will automatically handle the loading.
 
-### 2. Local Folder Method
-To use a local directory of images, the system currently expects a format compatible with the Hugging Face `datasets` library. You can use a local path in `dataset_name`, and the library will attempt to load it as an `ImageFolder`.
-
+### Option B: Local Image Folder
+You can point to a local directory containing images. For captions, use a `metadata.jsonl` file in the same directory.
 ```yaml
-dataset_name: /path/to/your/local/folder
-image_field: image
-caption_field: text # If using a metadata.jsonl
+dataset_name: "/Users/name/data/my_photos"
+image_field: "image"
+caption_field: "text"
 ```
+
+---
+
+## 📝 Tips for Quality Data
+- **Resolution**: All images are automatically resized and center-cropped to $64 \times 64$.
+- **Aspect Ratio**: For best results, use source images that are relatively square.
+- **Captions**: Detailed, descriptive captions (e.g., *"a fluffy white cat sleeping on a blue velvet sofa"*) perform much better than single words (*"cat"*).
+
+---
+*Reference Implementation: `src/data/loader.py`*

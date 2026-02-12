@@ -1,135 +1,129 @@
-# tiny-stable-diffusion
+# 🎨 tiny-stable-diffusion
 
-> **Stable Diffusion 3 from Scratch** - A minimal, educational implementation of modern text-to-image synthesis.
+> **Stable Diffusion 3 from Scratch** – A minimal, educational implementation of modern text-to-image synthesis.
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange) ![License](https://img.shields.io/badge/License-MIT-green)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange?style=flat-square&logo=pytorch)](https://pytorch.org/)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 
-A lightweight **200M parameter** implementation of Stable Diffusion 3 (SD3) optimized for consumer GPUs. This project demonstrates the core mechanics of **Rectified Flow** and **MMDiT** architecture by generating **64×64 images**.
+A lightweight **200M parameter** implementation of Stable Diffusion 3 (SD3) optimized for consumer GPUs. This project demonstrates the core mechanics of **Rectified Flow** and **MMDiT** architecture by generating **64×64 images** from scratch.
+
+---
+
+## 🌟 Overview
+
+This project is designed for researchers and enthusiasts who want to understand the inner workings of modern Latent Diffusion Models (LDMs). By focusing on a smaller scale ($64 \times 64$), it allows for complete training and inference cycles on a single consumer-grade GPU or even a modern laptop.
+
+### 🛠 Key Features
+
+- **Scalable Architecture**: Pure PyTorch implementation of the **MMDiT** (Multi-Modal Diffusion Transformer).
+- **Modern Training**: Implements **Rectified Flow** for straighter inference paths and faster sampling.
+- **Efficient Latent Space**: $8 \times 8 \times 16$ latent compression via a custom-trained **VAE (AutoencoderKL)**.
+- **Educational First**: Clean, modular code with minimal dependencies, focusing on readability and logic flow.
+- **Ready-to-use**: Includes scripts for training, inference, benchmarking, and a Streamlit-based interactive demo.
 
 ---
 
 ## 🚀 Quick Start
 
+### 1. Environment Setup
+We use `uv` for lightning-fast dependency management.
 ```bash
-# 1. Environment Setup
+# Install dependencies and setup environment
 bash scripts/setup.sh
+```
 
-# 2. Training Sequence (VAE -> Diffusion)
+### 2. Training Pipeline
+The model is trained in two distinct stages:
+```bash
+# Stage 1: Train the VAE for image compression
 uv run main.py --train-vae
-uv run main.py --train-diffusion
 
-# 3. Generate Images
-uv run main.py --generate --prompt "a cute cat"
+# Stage 2: Train the MMDiT for text-conditioned generation
+uv run main.py --train-diffusion
+```
+
+### 3. Generate Images
+```bash
+# Generate a single image from a prompt
+uv run main.py --generate --prompt "a cute cat in a spaceship"
 ```
 
 ---
 
 ## 🎨 Visual Demo
 
-Explore the model interactively using the built-in Streamlit dashboard.
+### Interactive Dashboard
+Explore the model's capabilities using the built-in Streamlit interface.
+```bash
+uv run streamlit run src/demo/app.py
+```
 
-### Streamlit Dashboard
 | VAE Reconstruction | Diffusion Generation |
 |:---:|:---:|
 | ![VAE Screenshot](assets/screenshot-vae.png) | ![Diffusion Screenshot](assets/screenshot-diffusion.png) |
-| *Visualizing VAE compression & reconstruction* | *Generating images from text prompts* |
+| *Visualizing $8 \times 8 \times 16$ compression* | *Generating 64px samples from text* |
 
-### Sample Outputs
-*Settings: `checkpoint=diffusion.pt (40 epochs)`, `steps=50`, `guidance=7.5`*
+### Sample Gallery
+*Settings: `40 epochs`, `steps=50`, `guidance=7.5`*
 
 | Prompt | Result | Prompt | Result |
 |:---|:---:|:---|:---:|
 | `a fluffy orange cat on a sofa` | ![01](docs/assets/diffusion_prompt_01.png) | `a red sports car on a rainy street` | ![02](docs/assets/diffusion_prompt_02.png) |
 | `a small cabin in snowy mountains` | ![03](docs/assets/diffusion_prompt_03.png) | `a sunflower field at sunset` | ![04](docs/assets/diffusion_prompt_04.png) |
-| `a bowl of ramen on a wooden table` | ![05](docs/assets/diffusion_prompt_05.png) | `a futuristic city skyline at night` | ![06](docs/assets/diffusion_prompt_06.png) |
-| `a corgi wearing sunglasses` | ![07](docs/assets/diffusion_prompt_07.png) | `a lighthouse by rough ocean waves` | ![08](docs/assets/diffusion_prompt_08.png) |
 
 ---
 
-## 🛠 Key Features
-
-- **64×64 Resolution**: Optimized for fast iteration and training on consumer hardware.
-- **SD3 Core Components**:
-    - **VAE**: AutoencoderKL with f8 compression and 16 latent channels.
-    - **MMDiT**: Multi-Modal Diffusion Transformer featuring Joint Attention.
-    - **Rectified Flow**: Modern linear interpolation-based diffusion training.
-- **Efficient Latent Space**: All diffusion happens in a compressed $8 \times 8 \times 16$ latent space.
-- **Educational Design**: Clean, modular PyTorch code with minimal external dependencies.
-
----
-
-## 📐 Architecture & Pipeline
+## 📐 Technical Architecture
 
 ### 1. Training Workflow
-The system follows a two-stage Latent Diffusion Model (LDM) approach.
+The system utilizes a two-stage approach to efficiently learn the distribution of high-dimensional images.
 
 ```mermaid
 graph TD
-    subgraph Stage 1: VAE
+    subgraph "Stage 1: VAE (Latent Space)"
     I[Image 64px] --> E[Encoder]
     E --> L[Latent 8x8x16]
     L --> D[Decoder]
     D --> R[Recon Image]
     end
     
-    subgraph Stage 2: Diffusion
+    subgraph "Stage 2: Diffusion (MMDiT)"
     T[Text] --> CLIP[CLIP Encoder]
     CLIP --> Emb[Text Embeds]
-    L2[Latent] --> Noise[Add Noise]
-    Noise --> MMDiT
+    L2[Latent] --> RF[Rectified Flow]
+    RF --> MMDiT
     Emb --> MMDiT
-    MMDiT --> Pred[Predict Velocity]
+    MMDiT --> Pred[Velocity Prediction]
     end
 ```
 
 ### 2. Inference Path
-`Text Prompt` ──► `CLIP` ──► `MMDiT` ──► `VAE Decoder` ──► `Generated Image`
+`Text Prompt` ──► `CLIP` ──► `MMDiT (Iterative Denoising)` ──► `VAE Decoder` ──► `Generated Image`
 
 ---
 
-## 💻 Usage
+## 📊 Performance & Comparison
 
-### Environment & Weights
-Detailed setup can be found in [`scripts/README.md`](scripts/README.md).
+### Benchmark (M2 MacBook Air)
+- **Device**: `mps` (Metal Performance Shaders)
+- **Inference Speed**: ~1.55 sec/image (at 10 steps)
+- **VRAM Usage**: ~1.5 GB Peak
 
-```bash
-# Download pretrained checkpoints from Hugging Face
-uv run python scripts/download_from_hub.py \
-  --repo-id junyeong-nero/tiny-sd-models \
-  --model-type all
-```
+### Model Complexity
 
-### Inference & Benchmarking
-```bash
-# Generate image
-uv run main.py --generate --prompt "a cosmic nebula" --steps 50
-
-# Run performance benchmark
-bash scripts/measure-inference.sh
-```
-
-**M2 MacBook Air Performance (`device=mps`):**
-- **Speed**: ~1.55 sec/image (10 steps)
-- **Peak Accel Memory**: ~1.5 GB
-
----
-
-## 📊 Model Comparison
-
-| Component | Parameters | Description |
-|-----------|------------|-------------|
+| Component | Parameters | Role |
+|-----------|------------|------|
 | **VAE** | ~21M | AutoencoderKL (f8 compression) |
-| **MMDiT** | ~187M (Base) | Multi-Modal DiT with Joint Attention |
+| **MMDiT** | ~187M | Joint Attention Transformer |
 | **CLIP** | 123M | Frozen ViT-B/32 Text Encoder |
 
-| Feature | Stable Diffusion 3 | tiny-stable-diffusion |
+| Feature | SD3 (Standard) | tiny-stable-diffusion |
 |---|---|---|
-| **Resolution** | 1024×1024 | 64×64 |
+| **Output Resolution** | 1024×1024 | 64×64 |
+| **Architectural Core** | MMDiT | MMDiT (Scalable) |
 | **Latent Channels** | 16 | 16 |
-| **Model Size** | 2B+ | ~200M |
-| **Training Cost** | Multi-GPU Cluster | Single Consumer GPU |
-
-For deep dives, see: [VAE Architecture](docs/models/VAE.md) | [MMDiT Architecture](docs/models/MMDiT.md) | [Diffusion Process](docs/models/Diffusion.md)
+| **Training Budget** | High-end Cluster | Single Consumer GPU |
 
 ---
 
@@ -138,20 +132,23 @@ For deep dives, see: [VAE Architecture](docs/models/VAE.md) | [MMDiT Architectur
 ```text
 .
 ├── main.py              # CLI entry point
-├── config.yaml          # Hyperparameters & Settings
+├── config.yaml          # Hyperparameters & Model settings
 ├── src/
-│   ├── models/          # VAE, MMDiT, Layers
-│   ├── training/        # Trainers & Loggers
-│   ├── inference/       # Image Generation logic
-│   └── demo/            # Streamlit Dashboard
-├── scripts/             # Utility & Training scripts
-└── docs/                # Technical documentation
+│   ├── models/          # Core implementations (VAE, MMDiT, Layers)
+│   ├── training/        # Training logic & Loggers
+│   ├── inference/       # Sampling & Generation pipelines
+│   └── demo/            # Streamlit Dashboard UI
+├── scripts/             # Shell scripts for setup & execution
+└── docs/                # In-depth technical documentation
 ```
 
 ---
 
-## 📜 References & License
+## 📜 References & Acknowledgements
 
-- [Stable Diffusion 3 (Scaling Rectified Flow Transformers)](https://arxiv.org/abs/2403.03206)
-- [DiT (Scalable Diffusion Models with Transformers)](https://arxiv.org/abs/2212.09748)
-- MIT License
+- **SD3**: [Scaling Rectified Flow Transformers](https://arxiv.org/abs/2403.03206)
+- **DiT**: [Scalable Diffusion Models with Transformers](https://arxiv.org/abs/2212.09748)
+- **CLIP**: [Learning Transferable Visual Models from Natural Language Supervision](https://arxiv.org/abs/2103.00020)
+
+---
+*Developed for educational purposes. Feel free to open an issue for questions or contributions.*

@@ -1,88 +1,81 @@
-# Inference & Generation Deep Dive
+# 🚀 Inference & Generation Deep Dive
 
-> A technical walkthrough of how `tiny-stable-diffusion` transforms a text prompt into a pixel-perfect image.
-
----
-
-## 🚀 The Generation Pipeline
-
-Generating an image happens in four distinct stages. The core logic is implemented in `src/inference/generator.py`.
-
-### Stage 1: Text Encoding (CLIP)
-The input prompt (e.g., *"a cute cat"*) is tokenized and processed by a frozen **CLIP ViT-B/32** model.
-- **Output**: A 512-dimensional embedding representing the prompt's semantics.
-- **Unconditional Embedding**: We also encode an empty string (`""`) for **Classifier-Free Guidance (CFG)**.
-
-### Stage 2: Latent Initialization
-We start in the **latent space** ($8 \times 8 \times 16$).
-- **Action**: Sample pure Gaussian noise $z_T \sim \mathcal{N}(0, I)$.
-- **Reproducibility**: If a `--seed` is provided, we fix the random generator to ensure the exact same image can be recreated.
-
-### Stage 3: Iterative Denoising (MMDiT)
-This is the heart of the model. We use the **Euler ODE Solver** with **Rectified Flow**.
-
-For each timestep $t$ from $1.0$ (pure noise) down to $0.0$ (clean latent):
-1.  **Predict Conditional Velocity**: $v_{cond} = \text{MMDiT}(z_t, t, \text{text\_embed})$
-2.  **Predict Unconditional Velocity**: $v_{uncond} = \text{MMDiT}(z_t, t, \text{uncond\_embed})$
-3.  **Apply CFG**: $v_{pred} = v_{uncond} + s \times (v_{cond} - v_{uncond})$
-4.  **Update Latent**: $z_{next} = z_t + v_{pred} \times dt$
-
-### Stage 4: VAE Decoding
-The clean latent $z_0$ is transformed back into the pixel domain.
-- **Action**: Pass through the VAE Decoder.
-- **Normalization**: Rescale from $[-1, 1]$ to $[0, 1]$ RGB values.
-- **Output**: A $64 \times 64$ RGB image.
+> Technical walkthrough of the journey from a text prompt to a $64 \times 64$ RGB image.
 
 ---
 
-## 🛠 Sampling Details
+## 🛠 The Generation Pipeline
 
-### Rectified Flow vs. Traditional Diffusion
-`tiny-stable-diffusion` (like SD3) uses **Rectified Flow**, which is mathematically simpler and more efficient than the Gaussian diffusion used in SD1.5/2.1.
+The generation process is a deterministic mapping from a text string to a pixel grid, managed by `src/inference/generator.py`.
 
-| Feature | SD1.5 (DDPM/DDIM) | tiny-sd (Rectified Flow) |
-| :--- | :--- | :--- |
-| **Trajectory** | Curved / Stochastic | **Straight / Deterministic** |
-| **Prediction Target** | Noise ($\epsilon$) | **Velocity ($v$)** |
-| **Path** | $X_t = \sqrt{\bar{\alpha}_t}X_0 + \sqrt{1-\bar{\alpha}_t}\epsilon$ | $X_t = (1-t)X_0 + tX_1$ |
+### 1. Semantic Encoding (CLIP)
+The input prompt (e.g., *"a golden retriever in a field"*) is tokenized and passed through the **Frozen CLIP Text Encoder**.
+- **Conditional Embed ($c$+)**: Represents the prompt's meaning.
+- **Unconditional Embed ($c$-)**: Represents an empty prompt (`""`), used as a baseline for **Classifier-Free Guidance (CFG)**.
 
-### Classifier-Free Guidance (CFG)
-CFG is a technique to trade off diversity for prompt alignment.
-- **Guidance Scale ($s$)**: A value of $1.0$ uses only the prompt. Higher values (e.g., $7.5$) "push" the generation harder toward the prompt's direction.
-- **Impact**: Higher $s$ leads to more vivid colors and better alignment but can cause "oversaturation" or artifacts if set too high ($>15$).
+### 2. Latent Initialization
+We begin in the $8 \times 8 \times 16$ latent domain.
+- **Noise Sampling**: Sample $z_1 \sim \mathcal{N}(0, I)$.
+- **Determinism**: By providing a fixed `--seed`, the initial noise state becomes reproducible, ensuring identical outputs for the same parameters.
+
+### 3. Iterative Denoising (The ODE Solver)
+We solve the Rectified Flow equation using an **Euler ODE Solver**. For $N$ steps (default 50), the model iterates from $t=1.0$ (noise) to $t=0.0$ (clean):
+
+1.  **Velocity Estimation**:
+    - $v_{pos} = \text{MMDiT}(z_t, t, c_+)$
+    - $v_{neg} = \text{MMDiT}(z_t, t, c_-)$
+2.  **CFG Application**:
+    $v_{final} = v_{neg} + \text{scale} \times (v_{pos} - v_{neg})$
+3.  **Step Update**:
+    $z_{t-dt} = z_t - (v_{final} \times dt)$
+
+### 4. VAE Reconstruction
+The final latent $z_0$ is mapped back to pixel space.
+- **Decoding**: The VAE Decoder expands the $8 \times 8 \times 16$ latent to a $64 \times 64 \times 3$ grid.
+- **Post-processing**: Values are clamped and rescaled to $[0, 255]$ for standard image formats.
 
 ---
 
-## ⌨️ CLI Usage
+## ⌨️ CLI Parameters & Tuning
 
 ```bash
 uv run main.py --generate \
-    --prompt "a fluffy orange cat on a sofa" \
+    --prompt "a spaceship landing on mars" \
     --steps 50 \
     --guidance 7.5 \
-    --seed 42 \
-    --output "my_cat.png"
+    --seed 42
 ```
 
-### Parameter Tuning
+### 💡 Tuning Guide
 
-| Parameter | Recommended | Range | Impact |
+| Parameter | Default | Range | Impact |
 | :--- | :--- | :--- | :--- |
-| **Steps** | 50 | 10–100 | Higher = more detail, slower generation. |
-| **Guidance** | 7.5 | 1.0–15.0 | Higher = stronger adherence to the prompt. |
-| **Seed** | - | Any Int | Fixes the random noise for reproducibility. |
+| **Steps** | 50 | 20 – 100 | **Quality vs. Speed**. 20-30 steps are often sufficient for Rectified Flow. |
+| **Guidance** | 7.5 | 1.0 – 15.0 | **Prompt Adherence**. Higher values increase contrast and alignment but may introduce artifacts. |
+| **Seed** | Random | Integer | **Variability**. Change the seed to get a different composition for the same prompt. |
 
 ---
 
-## ⚡ Optimization Tips
+## ⚡ Performance Optimization
 
-- **Half Precision**: Use `fp16` or `bf16` to reduce VRAM usage by 50% on compatible GPUs.
-- **Batching**: Generating multiple samples in a single batch is significantly faster than generating them sequentially.
-- **MPS Support**: On macOS, use `--device mps` to leverage the Apple Silicon Neural Engine.
+- **Precision**: Running in `fp16` or `bf16` significantly reduces VRAM usage and speeds up inference on modern GPUs (RTX 30+ / Apple Silicon).
+- **Device Support**: 
+    - Linux/Windows: `--device cuda`
+    - macOS: `--device mps`
+- **Batching**: You can generate multiple images simultaneously to maximize throughput by increasing the batch size in the generator config.
 
 ---
 
-## 📚 Advanced Implementation
-- **Euler Solver**: `src/inference/generator.py`
-- **MMDiT Logic**: `src/models/mmdit.py`
-- **VAE Decoding**: `src/models/vae.py`
+## 🔍 Common Issues (FAQ)
+
+**Q: The generated image looks like colorful static.**
+- *Check your checkpoint paths. This usually happens when the VAE or Diffusion weights are not loaded correctly.*
+
+**Q: The image is blurry or lacks detail.**
+- *Increase the number of steps (e.g., to 100) or check if the VAE has been fully trained (Stage 1).*
+
+**Q: The prompt is being ignored.**
+- *Increase the `guidance_scale` (CFG). Values between 7.5 and 10.0 are typically the "sweet spot".*
+
+---
+*Reference Implementation: `src/inference/generator.py`*

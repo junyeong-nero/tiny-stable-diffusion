@@ -1,64 +1,58 @@
-# Training Pipeline Deep Dive
+# 🏛 Training Pipeline Philosophy
 
-> A comprehensive look at the "how" and "why" behind our training methodology.
+> Why we train the way we do. A deep dive into the Latent Diffusion Model strategy.
 
 ---
 
-## 🏛 The Two-Stage Philosophy
+## 🧩 The Two-Stage Approach
 
-`tiny-stable-diffusion` follows the standard **Latent Diffusion Model (LDM)** strategy, splitting training into two independent stages.
+Training a diffusion model directly on pixels is computationally prohibitive. `tiny-stable-diffusion` follows the **Latent Diffusion** strategy to maximize efficiency.
 
-| Stage | Goal | Active Component | Weights |
+| Stage | Focus | Learnable Parameters | Input/Output |
 | :--- | :--- | :--- | :--- |
-| **Stage 1** | Learn Image Compression | VAE | Trainable |
-| **Stage 2** | Learn Text-to-Image Mapping | MMDiT | Trainable (VAE Frozen) |
+| **1: VAE** | Spatial Compression | 21M | $64 \times 64 \times 3 \rightleftarrows 8 \times 8 \times 16$ |
+| **2: Diffusion** | Semantic Mapping | 87M - 559M | Text Embeddings $\rightarrow$ Latents |
 
-### Why separate them?
-1.  **Efficiency**: Diffusion in pixel space is extremely slow. By compressing images first, we reduce the computational workload by over 12x.
-2.  **Stability**: Training a VAE to reconstruct pixels is a well-understood task. Once the latent space is "stable," training the Diffusion model becomes much more predictable.
-
----
-
-## 🏗 Stage 1: VAE Training
-
-**Core Objective**: Minimize Reconstruction Error while keeping Latent Space regularized.
-
-### The Loss Function
-$$L = L_{pixel} + \beta L_{KL}$$
-- **$L_{pixel}$ (MSE)**: Forces the model to preserve fine details.
-- **$L_{KL}$**: Prevents the latent space from becoming too sparse, allowing for smoother generation. We use a very low $\beta$ ($10^{-6}$) to prioritize detail.
-
-### Optimization Strategy
-- **AdamW Optimizer**: Standard choice for high-stability training.
-- **Cosine Annealing**: Gradually reduces the learning rate to settle into a local minimum for high-quality reconstruction.
+### 💡 Why separate them?
+1.  **Complexity Reduction**: The diffusion model works on a $64 \times$ smaller representation.
+2.  **Stability**: We freeze the VAE during Stage 2, ensuring the "ground truth" for the diffusion model doesn't shift during training.
 
 ---
 
-## 🔥 Stage 2: Diffusion Training
+## 🏗 Stage 1: VAE Optimization
 
-**Core Objective**: Learn to predict the velocity vector that reverses noise into a clean latent.
+**Objective**: Perfect reconstruction while maintaining a Gaussian latent distribution.
 
-### Key Innovations
-1.  **Rectified Flow**: We train the model on a linear path between noise and data.
-2.  **Min-SNR Weighting**: We weigh the loss based on the Signal-to-Noise Ratio (SNR) of each timestep. This ensures the model focuses on the most "difficult" parts of the denoising process.
-3.  **CFG Dropout**: During training, we randomly drop the text prompt (10% of the time). This forces the model to learn an "unconditional" generation path, which is essential for Classifier-Free Guidance during inference.
-
-### Exponential Moving Average (EMA)
-We maintain a "shadow" copy of the MMDiT weights that updates very slowly (decay rate of $0.9999$).
-- **Benefit**: The EMA weights represent a temporal average of the model's parameters, which significantly reduces noise and artifacts in the generated images. Always use EMA weights for final inference.
+- **Loss Composition**: $Loss = MSE + \beta \cdot KL\_Divergence$
+- **Perceptual Tuning**: We use a very low $\beta$ ($10^{-6}$). This prioritizes pixel-perfect detail over extreme latent regularity, which is ideal for low-resolution $64 \times 64$ generation.
+- **Bottleneck**: The 16-channel latent space is wide enough to prevent "information collapse" but narrow enough to force meaningful compression.
 
 ---
 
-## 📦 Checkpoint & Hub Integration
+## 🔥 Stage 2: Diffusion & Rectified Flow
 
-The pipeline is designed to be fully automated.
-- **Best Model Saving**: We automatically track the validation loss and save the `best` weights to `checkpoints/`.
-- **Hugging Face Hub**: Use the `--push-to-hub` flag to automatically version your models on the HF Hub, making them easily shareable.
+**Objective**: Learn the velocity field that maps noise to data.
+
+### 1. Rectified Flow Training
+Unlike traditional models that predict noise ($\epsilon$), we predict **Velocity** ($v$).
+- **Linear Path**: During training, we interpolate: $z_t = (1-t)z_0 + t\epsilon$.
+- **Straightness**: This linear interpolation forces the model to learn a straight path, making inference much faster and more accurate with simple ODE solvers.
+
+### 2. CFG Dropout (Conditioning)
+During training, we randomly drop the text prompt for **10% of samples**.
+- **Reason**: This forces the model to learn both conditional and unconditional generation, which is the prerequisite for **Classifier-Free Guidance** during inference.
+
+### 3. EMA (Exponential Moving Average)
+We maintain a "Shadow Copy" of the model weights that updates slowly ($\text{decay} = 0.9999$).
+- **Benefit**: EMA weights are significantly smoother and produce fewer artifacts. They represent a temporal consensus of the model's knowledge.
 
 ---
 
-## 🧪 Best Practices for Fine-Tuning
+## 📈 Monitoring & Best Practices
 
-1.  **Start Small**: Use the `S` (Small) model to quickly verify your dataset and hyperparameters.
-2.  **Monitor Latent Stats**: If your VAE's latent mean drifts too far from $0$, or variance from $1$, your Diffusion model will struggle.
-3.  **Check Validation Samples**: Don't just trust the loss curve. Visual inspection of the `samples/` folder is the most reliable way to judge generation progress.
+1.  **Visual Over Metrics**: Loss curves can be misleading. Always judge progress by the samples generated in the `samples/` directory.
+2.  **Latent Statistics**: In W&B, monitor the mean and standard deviation of the VAE latents. They should stay close to $0.0$ and $1.0$ respectively.
+3.  **Warmup**: Use a small learning rate warmup (1,000 steps) to prevent early training instability.
+
+---
+*Reference: [Rectified Flow Foundations](https://arxiv.org/abs/2209.03003)*
