@@ -77,58 +77,6 @@ uv run main.py --reconstruct-vae \
 ./scripts/evaluate-vae.sh --input-dir assets/samples
 ```
 
-### Latest Evaluation Run
-
-```bash
-./scripts/evaluate-vae.sh \
-    --input-dir assets/samples \
-    --checkpoint checkpoints/vae.pt \
-    --max-samples 100
-```
-
-**Run Context**
-- Date: `2026-02-11`
-- Checkpoint: `checkpoints/vae.pt` (epoch 39)
-- Input set: `assets/samples`
-- Evaluated samples: `100`
-- LPIPS: Computed (`lpips==0.1.4`)
-
-**Measured Reconstruction Metrics**
-
-| Metric | Value | Interpretation |
-| :--- | :--- | :--- |
-| **PSNR** | **37.99 dB** | Strong pixel-level fidelity (high) |
-| **SSIM** | **0.9784** | Strong structural similarity (high) |
-| **MSE** | **0.000195** | Low reconstruction error |
-| **LPIPS** | **0.0094** | Very low perceptual distance |
-
-Overall, this checkpoint shows high-fidelity reconstruction quality for 64x64 inputs and is suitable as the latent encoder/decoder stage for diffusion training and inference.
-
-### Additional Dataset Evaluation (`--max-samples 1000`)
-
-```bash
-./scripts/evaluate-vae.sh \
-    --dataset reach-vb/pokemon-blip-captions \
-    --checkpoint checkpoints/vae.pt \
-    --max-samples 1000
-```
-
-**Run Context**
-- Date: `2026-02-11`
-- Checkpoint: `checkpoints/vae.pt` (epoch 39)
-- Dataset: `reach-vb/pokemon-blip-captions` (`split=train`, `image_field=image`)
-- Requested samples: `1000`
-- Evaluated samples: `833` (dataset availability limit during run)
-
-**Measured Reconstruction Metrics (833 samples)**
-
-| Metric | Value | Interpretation |
-| :--- | :--- | :--- |
-| **PSNR** | **31.60 dB** | Good pixel-level fidelity |
-| **SSIM** | **0.9679** | Strong structural similarity |
-| **MSE** | **0.000770** | Low reconstruction error |
-| **LPIPS** | **0.0146** | Low perceptual distance |
-
 ---
 
 ## 📚 Implementation Reference

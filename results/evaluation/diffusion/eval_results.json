@@ -1,11 +1,11 @@
 {
-  "fid": 343.1047058105469,
-  "clip_fid": 47.23408401704401,
-  "inception_score_mean": 1.0,
-  "inception_score_std": 8.429369557916289e-08,
-  "clip_score_mean": 25.339282989501953,
+  "fid": 96.5757064819336,
+  "clip_fid": 19.29066661822091,
+  "inception_score_mean": 7.738439083099365,
+  "inception_score_std": 0.5936426520347595,
+  "clip_score_mean": 24.831130981445312,
   "clip_score_std": 0.0,
-  "num_generated": 10,
-  "num_real": 10,
+  "num_generated": 1000,
+  "num_real": 1000,
   "checkpoint": "checkpoints/diffusion.pt"
 }

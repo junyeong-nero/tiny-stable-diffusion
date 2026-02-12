@@ -58,24 +58,6 @@ diffusion_train:
     logit_std: 1.0
 ```
 
----
-
-## 📊 Latest Evaluation (checkpoints/diffusion.pt)
-
-From `results/evaluation/diffusion/eval_results.json`:
-
-| Metric | Value |
-|---|---:|
-| FID | 343.1047 |
-| CLIP-FID | 47.2341 |
-| Inception Score (mean) | 1.0000 |
-| Inception Score (std) | 0.0000000843 |
-| CLIP Score (mean) | 25.3393 |
-| CLIP Score (std) | 0.0000 |
-| Generated samples | 10 |
-| Real samples | 10 |
-
-> Note: these metrics were computed on a very small sample size (`num_generated=10`, `num_real=10`), so they are useful for quick regression checks but not for stable quality benchmarking.
 
 ---
 
