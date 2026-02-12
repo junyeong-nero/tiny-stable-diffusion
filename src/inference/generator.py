@@ -62,6 +62,7 @@ def infer_model_config_from_state_dict(state_dict: dict) -> dict:
         num_patches = state_dict["model.pos_embed.pos_embed"].shape[1]
         # latent_size = sqrt(num_patches) * patch_size
         import math
+
         patch_size = config.get("patch_size", 2)
         latent_size = int(math.sqrt(num_patches)) * patch_size
         config["latent_size"] = latent_size
@@ -106,6 +107,7 @@ def generate(
     vae_checkpoint: str | Path | None = None,
     num_samples: int = 1,
     num_steps: int = 50,
+    sampler: str = "euler",
     guidance_scale: float = 7.5,
     seed: int | None = None,
     device: str = "auto",
@@ -119,6 +121,7 @@ def generate(
         vae_checkpoint: Path to VAE checkpoint
         num_samples: Number of samples per prompt
         num_steps: Number of diffusion steps
+        sampler: Sampling method ("euler" or "ddim")
         guidance_scale: Classifier-free guidance scale
         seed: Random seed for reproducibility
         device: Device to use ("auto", "cuda", "mps", "cpu")
@@ -130,19 +133,19 @@ def generate(
     if seed is not None:
         set_seed(seed)
 
-    device = get_device(device)
-    print(f"Using device: {device}")
+    runtime_device = get_device(device)
+    print(f"Using device: {runtime_device}")
 
     # Load CLIP encoder
     print("Loading CLIP text encoder...")
     clip_encoder = CLIPTextEncoder()
-    clip_encoder = clip_encoder.to(device)
+    clip_encoder = clip_encoder.to(runtime_device)
     clip_encoder.eval()
 
     # Compute unconditional embedding
     with torch.no_grad():
         uncond_embed = clip_encoder.encode([""])
-    uncond_embed = uncond_embed.to(device)
+    uncond_embed = uncond_embed.to(runtime_device)
 
     # Find diffusion checkpoint
     if checkpoint is None:
@@ -155,7 +158,7 @@ def generate(
         raise FileNotFoundError(f"Diffusion checkpoint not found: {checkpoint}")
 
     print(f"Loading diffusion checkpoint: {checkpoint}")
-    ckpt = torch.load(checkpoint, map_location=device)
+    ckpt = torch.load(checkpoint, map_location=runtime_device)
 
     # Try to get config from checkpoint, or infer from state_dict
     model_config = ckpt.get("model_config", ckpt.get("config", {}))
@@ -179,7 +182,9 @@ def generate(
     # Find VAE checkpoint
     if vae_checkpoint is None:
         vae_checkpoint = model_config.get("vae_checkpoint", "checkpoints/vae.pt")
-    vae_checkpoint = Path(vae_checkpoint)
+    if vae_checkpoint is None:
+        raise ValueError("VAE checkpoint path is missing in config and arguments")
+    vae_checkpoint = Path(str(vae_checkpoint))
 
     if not vae_checkpoint.exists():
         raise FileNotFoundError(f"VAE checkpoint not found: {vae_checkpoint}")
@@ -192,9 +197,9 @@ def generate(
         ch=model_config.get("vae_ch", 64),
         ch_mult=tuple(model_config.get("vae_ch_mult", [1, 2, 4, 4])),
     )
-    vae_state = torch.load(vae_checkpoint, map_location=device)
+    vae_state = torch.load(vae_checkpoint, map_location=runtime_device)
     vae.load_state_dict(vae_state["model_state_dict"])
-    vae = vae.to(device)
+    vae = vae.to(runtime_device)
     vae.eval()
 
     # Set scaling factor: argument > checkpoint > config > default
@@ -224,7 +229,7 @@ def generate(
         register_tokens=register_tokens,
     )
     model.load_state_dict(ckpt["model_state_dict"])
-    model = model.to(device)
+    model = model.to(runtime_device)
     model.eval()
 
     # Initialize Rectified Flow diffusion
@@ -241,14 +246,14 @@ def generate(
         print(f"  [{i + 1}/{len(prompts)}] '{prompt}'")
 
         text_embeds = clip_encoder.encode([prompt] * num_samples)
-        text_embeds = text_embeds.to(device)
+        text_embeds = text_embeds.to(runtime_device)
 
-        # Sample in latent space using Euler ODE solver, decode to image
         images = diffusion.sample(
             model=model,
             shape=(num_samples, in_channels, latent_size, latent_size),
             text_embeds=text_embeds,
             num_steps=num_steps,
+            sampler=sampler,
             use_cfg=True,
             vae_decoder=vae,
         )
@@ -315,8 +320,12 @@ def demo(
     # Find VAE checkpoint
     if vae_checkpoint is None:
         vae_checkpoint = model_config.get("vae_checkpoint", "checkpoints/vae.pt")
+    if vae_checkpoint is None:
+        print("Error: VAE checkpoint path is missing in config and arguments")
+        return
+    vae_checkpoint = Path(str(vae_checkpoint))
 
-    if not Path(vae_checkpoint).exists():
+    if not vae_checkpoint.exists():
         print(f"Error: VAE checkpoint not found: {vae_checkpoint}")
         return
 

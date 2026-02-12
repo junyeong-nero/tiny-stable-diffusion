@@ -77,6 +77,13 @@ def main() -> None:
     )
     parser.add_argument("--num-samples", type=int, default=1, help="Number of samples to generate")
     parser.add_argument("--steps", type=int, default=50, help="Number of diffusion steps")
+    parser.add_argument(
+        "--sampler",
+        type=str,
+        default="euler",
+        choices=["euler", "ddim"],
+        help="Sampling solver for diffusion generation",
+    )
     parser.add_argument("--guidance", type=float, default=7.5, help="Guidance scale")
     parser.add_argument("--scaling-factor", type=float, default=None, help="VAE scaling factor")
     parser.add_argument("--output", type=str, default="results/output.png", help="Output file path")
@@ -328,6 +335,7 @@ def _run_generation(args: argparse.Namespace) -> None:
         vae_checkpoint=args.vae_checkpoint,
         num_samples=args.num_samples,
         num_steps=args.steps,
+        sampler=args.sampler,
         guidance_scale=args.guidance,
         seed=args.seed,
         scaling_factor=args.scaling_factor,

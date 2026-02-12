@@ -165,6 +165,44 @@ class TestDiffusion:
         assert "num_timesteps=1000" in repr_str
         assert "RectifiedFlow" in repr_str
 
+    def test_sample_with_ddim_sampler(
+        self, diffusion: Diffusion, dummy_model: SimpleDummyModel
+    ) -> None:
+        """Test DDIM sampler path produces valid output."""
+        text_embeds = torch.randn(2, 512)
+
+        samples = diffusion.sample(
+            model=dummy_model,
+            shape=(2, 3, 32, 32),
+            text_embeds=text_embeds,
+            num_steps=4,
+            sampler="ddim",
+            use_cfg=False,
+            seed=123,
+        )
+
+        assert samples.shape == (2, 3, 32, 32)
+        assert not torch.isnan(samples).any()
+        assert (samples >= 0).all()
+        assert (samples <= 1).all()
+
+    def test_sample_invalid_sampler_raises(
+        self, diffusion: Diffusion, dummy_model: SimpleDummyModel
+    ) -> None:
+        """Test invalid sampler name is rejected."""
+        text_embeds = torch.randn(1, 512)
+
+        with pytest.raises(ValueError):
+            diffusion.sample(
+                model=dummy_model,
+                shape=(1, 3, 32, 32),
+                text_embeds=text_embeds,
+                num_steps=2,
+                sampler="unknown",
+                use_cfg=False,
+                seed=123,
+            )
+
 
 class TestDiffusionNumericalStability:
     """Test numerical stability of Rectified Flow diffusion process."""

@@ -4,6 +4,7 @@ Implements Rectified Flow from Stable Diffusion 3:
 - Linear interpolation forward process: x_t = (1-t)*x_0 + t*noise
 - Velocity prediction: v = noise - x_0
 - Euler ODE sampling
+- DDIM-style deterministic sampling
 - CFG: Ho et al., "Classifier-Free Diffusion Guidance" (2021)
 
 For Stable Diffusion 3 style latent-space diffusion:
@@ -209,11 +210,12 @@ class Diffusion:
         shape: tuple[int, int, int, int],
         text_embeds: torch.Tensor,
         num_steps: int = 50,
+        sampler: str = "euler",
         use_cfg: bool = True,
         seed: int | None = None,
         vae_decoder: "AutoencoderKL | None" = None,
     ) -> torch.Tensor:
-        """Generate samples using Euler ODE solver.
+        """Generate samples using the selected solver.
 
         For latent-space diffusion (SD3 style):
             - shape should be (B, latent_channels, latent_h, latent_w)
@@ -224,6 +226,7 @@ class Diffusion:
             shape: Output shape (B, C, H, W) - latent shape if using VAE
             text_embeds: Text embeddings (B, D)
             num_steps: Number of sampling steps
+            sampler: Sampling method ("euler" or "ddim")
             use_cfg: Use classifier-free guidance
             seed: Random seed
             vae_decoder: Optional VAE decoder for latent-to-image conversion
@@ -242,26 +245,37 @@ class Diffusion:
 
         # Create timestep schedule: evenly spaced from T-1 to 0
         # Example: num_timesteps=1000, num_steps=50 -> [999, 979, 959, ..., 19, 0]
-        timesteps = torch.linspace(
-            self.num_timesteps - 1, 0, num_steps + 1, device=device
-        ).long()
+        timesteps = torch.linspace(self.num_timesteps - 1, 0, num_steps + 1, device=device).long()
 
-        # Euler sampling loop
+        sampler_name = sampler.lower()
+        if sampler_name not in {"euler", "ddim"}:
+            raise ValueError(f"Unsupported sampler: {sampler}. Choose from ['euler', 'ddim']")
+
         for i in tqdm.tqdm(range(num_steps), desc="Sampling"):
             t_curr = timesteps[i]
             t_next = timesteps[i + 1]
 
-            t_curr_batch = torch.full((B,), t_curr, device=device, dtype=torch.long)
-            t_next_batch = torch.full((B,), t_next, device=device, dtype=torch.long)
+            t_curr_batch = t_curr.repeat(B).to(device=device, dtype=torch.long)
+            t_next_batch = t_next.repeat(B).to(device=device, dtype=torch.long)
 
-            x_t = self.euler_step(
-                model,
-                x_t,
-                t_curr_batch,
-                t_next_batch,
-                text_embeds,
-                use_cfg=use_cfg,
-            )
+            if sampler_name == "euler":
+                x_t = self.euler_step(
+                    model,
+                    x_t,
+                    t_curr_batch,
+                    t_next_batch,
+                    text_embeds,
+                    use_cfg=use_cfg,
+                )
+            else:
+                x_t = self.ddim_step(
+                    model,
+                    x_t,
+                    t_curr_batch,
+                    t_next_batch,
+                    text_embeds,
+                    use_cfg=use_cfg,
+                )
 
         # Decode latent to image if VAE decoder provided
         if vae_decoder is not None:
@@ -272,6 +286,54 @@ class Diffusion:
         x_t = torch.clamp(x_t, 0.0, 1.0)
 
         return x_t
+
+    def ddim_step(
+        self,
+        model: nn.Module,
+        x_t: torch.Tensor,
+        t_curr: torch.Tensor,
+        t_next: torch.Tensor,
+        text_embeds: torch.Tensor,
+        use_cfg: bool = True,
+    ) -> torch.Tensor:
+        """Single DDIM-style deterministic step for Rectified Flow.
+
+        We convert velocity prediction into x0/noise parameterization:
+            x_t = (1 - t) * x0 + t * eps
+            v = eps - x0
+        then deterministically move to t_next with eta=0.
+
+        Args:
+            model: Diffusion model that predicts velocity
+            x_t: Current noisy sample (B, C, H, W)
+            t_curr: Current timestep (B,)
+            t_next: Next timestep (B,)
+            text_embeds: Text embeddings
+            use_cfg: Whether to apply classifier-free guidance
+
+        Returns:
+            Denoised sample at t_next
+        """
+        v_pred = model(x_t, t_curr, text_embeds)
+
+        if use_cfg and self.guidance_scale != 1.0 and self.uncond_embed is not None:
+            uncond_embed = self.uncond_embed.to(x_t.device)
+            if uncond_embed.shape[0] == 1 and x_t.shape[0] > 1:
+                uncond_embed = uncond_embed.expand(x_t.shape[0], *uncond_embed.shape[1:])
+
+            with torch.no_grad():
+                v_uncond = model(x_t, t_curr, uncond_embed)
+
+            v_pred = v_uncond + self.guidance_scale * (v_pred - v_uncond)
+
+        t_curr_norm = (t_curr.float() / self.num_timesteps).view(-1, 1, 1, 1)
+        t_next_norm = (t_next.float() / self.num_timesteps).view(-1, 1, 1, 1)
+
+        x0_pred = x_t - t_curr_norm * v_pred
+        eps_pred = x0_pred + v_pred
+
+        x_next = (1.0 - t_next_norm) * x0_pred + t_next_norm * eps_pred
+        return x_next
 
     def training_loss(
         self,
@@ -313,17 +375,15 @@ class Diffusion:
                 uncond_expanded = uncond_embed.expand(batch_size, -1)
 
                 # Replace dropped samples with unconditional embedding (vectorized)
-                text_embeds = torch.where(
-                    drop_mask.unsqueeze(-1), uncond_expanded, text_embeds
-                )
+                text_embeds = torch.where(drop_mask.unsqueeze(-1), uncond_expanded, text_embeds)
 
         # Predict velocity
         v_pred = model(x_t, timesteps, text_embeds)
 
         # Compute per-sample MSE loss (reduce over C, H, W, keep batch dimension)
-        per_sample_loss = nn.functional.mse_loss(
-            v_pred, v_target, reduction="none"
-        ).mean(dim=(1, 2, 3))
+        per_sample_loss = nn.functional.mse_loss(v_pred, v_target, reduction="none").mean(
+            dim=(1, 2, 3)
+        )
 
         # Apply Min-SNR weighting
         if self.min_snr_gamma is not None:
@@ -418,4 +478,6 @@ if __name__ == "__main__":
 
     # Test logit-normal sampling
     timesteps = diffusion.sample_timesteps_logit_normal(1000, torch.device("cpu"))
-    print(f"Logit-normal timesteps - mean: {timesteps.float().mean():.1f}, std: {timesteps.float().std():.1f}")
+    print(
+        f"Logit-normal timesteps - mean: {timesteps.float().mean():.1f}, std: {timesteps.float().std():.1f}"
+    )
